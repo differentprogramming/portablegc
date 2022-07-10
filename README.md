@@ -1,8 +1,8 @@
 # portablegc
 
-A precise, garbage collector for C++ that supports multiple mutating threads and even multiple collecting threads.  Threads are never stopped at any stage of collection.
+A precise garbage collector for C++ that supports multiple mutating threads and even multiple collecting threads.  Threads are never stopped at any stage of collection.
 
-In order to use it, you have to create types that can tell the collector how many pointers they contain, and supply them one by one to be traced. The type also has to support being created in a dormant state to sit in a block of other such objects, to be activated when needed and deactivated when collected.   There is no support for resurrecting any objects on finalization. 
+In order to use it, you have to create types that can tell the collector how many pointers they contain and supply them one by one to be traced. The type also has to support being created in a dormant state to sit in a block of other such objects, to be activated when needed and deactivated when collected.   There is no support for resurrecting any objects on finalization. 
 
 It also has configurable support for tagged pointers for value types, so for instance you could have a cheap small int type, an atom type and character type if you set aside two bit for value types.
 
