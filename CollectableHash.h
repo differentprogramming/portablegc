@@ -17,7 +17,7 @@ The hash table uses linear probing and stays at least 4 times as big as the numb
 
 #define INITIAL_HASH_SIZE 1024
 
-extern CollectableSentinal hash_marker;
+extern CollectableSentinel hash_marker, CollectableNull;
 
 
 template<typename K, typename V>
@@ -27,7 +27,7 @@ struct CollectableKeyHashEntry
 	bool empty;
 	InstancePtr<K> key;
 	V value;
-	CollectableKeyHashEntry() :skip(false), empty(true), key(nullptr) {}
+	CollectableKeyHashEntry() :skip(false), empty(true), key(collectable_null) {}
 	int total_instance_vars() const { return 1; }
 	InstancePtrBase* index_into_instance_vars(int num) { return &key;  }
 };
@@ -158,7 +158,7 @@ struct CollectableValueHashEntry
 	bool empty;
 	K key;
 	InstancePtr<V> value;
-	CollectableValueHashEntry() :skip(false),empty(true), value(nullptr) {}
+	CollectableValueHashEntry() :skip(false),empty(true), value(collectable_null) {}
 	int total_instance_vars() const { return 1; }
 	InstancePtrBase* index_into_instance_vars(int num) { return &value; }
 };
@@ -236,7 +236,7 @@ struct CollectableValueHashTable :public Collectable
 
 			return pair->value;
 		}
-		return (V*)nullptr;
+		return (V*)collectable_null;
 	}
 	bool insert(const K& key, const RootPtr<V>& value)
 	{
@@ -265,7 +265,7 @@ struct CollectableValueHashTable :public Collectable
 		CollectableValueHashEntry<K, V>* pair = nullptr;
 		if (findu(pair, key, false)) {
 			pair->skip = true;
-			pair->value = nullptr;
+			pair->value = collectable_null;
 			pair->empty = true;
 			used = used - 1;
 			++wasted;
@@ -359,7 +359,7 @@ struct CollectableHashTable :public Collectable
 	}
 
 	bool contains(const RootPtr<K> &key) const {
-		CollectableHashEntry<K, V>* pair = nullptr;
+		CollectableHashEntry<K, V>* pair = collectable_null;
 		return findu(pair, key, false);
 	}
 	RootPtr<V> operator[](const RootPtr<K>& key)
@@ -369,7 +369,7 @@ struct CollectableHashTable :public Collectable
 
 			return pair->value;
 		}
-		return (V *)nullptr;
+		return (V *)collectable_null;
 	}
 	bool insert(const RootPtr<K>& key, const RootPtr<V>& value)
 	{
@@ -399,8 +399,8 @@ struct CollectableHashTable :public Collectable
 		CollectableHashEntry<K, V>* pair = nullptr;
 		if (findu(pair, key, false)) {
 			pair->skip = true;
-			pair->key = nullptr;
-			pair->value = nullptr;
+			pair->key = collectable_null;
+			pair->value = collectable_null;
 			pair->empty = true;
 			used = used - 1;
 			++wasted;
@@ -425,7 +425,7 @@ struct HashEntry
 	bool empty;
 	K key;
 	V value;
-	HashEntry() :skip(false),empty(true), key(nullptr), value(nullptr) {}
+	HashEntry() :skip(false),empty(true), key(collectable_null), value(collectable_null) {}
 };
 
 template<typename K, typename V>
@@ -520,7 +520,7 @@ struct HashTable :public Collectable
 	{
 		HashEntry<K, V>* pair = nullptr;
 		findu(pair, key, true);
-		bool replacing = pair->key.get() != nullptr;
+		bool replacing = pair->key.get() != collectable_null;
 		pair->key = key;
 		pair->value = value;
 		pair->empty = false;

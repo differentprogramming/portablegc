@@ -73,7 +73,7 @@ namespace GC {
             Handles[handle-1].list = EndOfHandleFreeList;
         }
         HandleList[0] = 1;
-        Handles[0].ptr = nullptr;
+        Handles[0].ptr = collectable_null;
     }
 
 };

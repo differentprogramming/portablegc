@@ -35,6 +35,11 @@
 //#include "LockFreeFIFO.h"
 
 class Collectable;
+class CollectableSentinel;
+
+extern CollectableSentinel CollectableNull;
+
+#define collectable_null ((Collectable*)&CollectableNull)
 namespace GC {
     typedef uint32_t Handle;
 
@@ -187,9 +192,9 @@ namespace GC {
     }
 
 
-#define cnew(A) ([&]{ auto * _AskdlfA_=new A;  GC::log_alloc(_AskdlfA_->my_size()); GC::Handle _lskdfjKJK_ = GC::AllocateHandle(); GC::Handles[_lskdfjKJK_].ptr =  _AskdlfA_; _AskdlfA_->myHandle = _lskdfjKJK_; return _lskdfjKJK_; })()
-#define cnew2template(A,B) ([&]{ auto * _AskdlfA_=new A,B;  GC::log_alloc(_AskdlfA_->my_size()); GC::Handle _lskdfjKJK_ = GC::AllocateHandle(); GC::Handles[_lskdfjKJK_].ptr =  _AskdlfA_; _AskdlfA_->myHandle = _lskdfjKJK_; return _lskdfjKJK_; })()
-#define cnew3template(A,B,C) ([&]{ auto * _AskdlfA_=new A,B,C;  GC::log_alloc(_AskdlfA_->my_size()); GC::Handle _lskdfjKJK_ = GC::AllocateHandle(); GC::Handles[_lskdfjKJK_].ptr =  _AskdlfA_; _AskdlfA_->myHandle = _lskdfjKJK_; return _lskdfjKJK_; })()
+#define cnew(A) ([&]{ auto * _AskdlfA_=new A;  GC::log_alloc(_AskdlfA_->my_size()); GC::Handle _lskdfjKJK_ = GC::AllocateHandle(); GC::Handles[_lskdfjKJK_].ptr =  _AskdlfA_; _AskdlfA_->myHandle = _lskdfjKJK_; return _AskdlfA_; })()
+#define cnew2template(A,B) ([&]{ auto * _AskdlfA_=new A,B;  GC::log_alloc(_AskdlfA_->my_size()); GC::Handle _lskdfjKJK_ = GC::AllocateHandle(); GC::Handles[_lskdfjKJK_].ptr =  _AskdlfA_; _AskdlfA_->myHandle = _lskdfjKJK_; return _AskdlfA_; })()
+#define cnew3template(A,B,C) ([&]{ auto * _AskdlfA_=new A,B,C;  GC::log_alloc(_AskdlfA_->my_size()); GC::Handle _lskdfjKJK_ = GC::AllocateHandle(); GC::Handles[_lskdfjKJK_].ptr =  _AskdlfA_; _AskdlfA_->myHandle = _lskdfjKJK_; return _AskdlfA_; })()
 //#define cnew_array(A,N) ([&]{ auto _NfjkasjdflN_ = N; auto _AskdlfA_=new A[_NfjkasjdflN_];  GC::log_array_alloc(_AskdlfA_[0]->my_size(),_NfjkasjdflN_); GC::Handle _lskdfjKJK_ = GC::AllocateHandle(); GC::Handles[_lskdfjKJK_].ptr =  _AskdlfA_; return _lskdfjKJK_; })()
 
     extern std::atomic_uint32_t ThreadsInGC;

@@ -1,4 +1,5 @@
 #include "CollectableHash.h"
 
 
-CollectableSentinal hash_marker;
+CollectableSentinel hash_marker;
+CollectableSentinel CollectableNull;

@@ -104,27 +104,32 @@ public:
 template <typename T>
 class InstancePtr : public InstancePtrBase
 {
-    void double_ptr_store(GC::Handle v) { GC::double_ptr_store(&value, (void*)v); }
+    void double_ptr_store(T* v) { GC::double_ptr_store(&value,  v->getHandle()); }
 public:
 
     GC::Handle getHandle() const { return GC::load(&value); }
     T* get() const { return (T*)GC::Handles[GC::load(&value)].ptr; }
 
-    void store(GC::Handle const v) { GC::write_barrier(&value, v); }
+    void store(T* const v) { GC::write_barrier(&value,  v->getHandle()); }
     template<typename U>
     auto operator[](U i) const { return (*get())[i]; }
     T& operator*() const { return *get(); }
     T* operator -> () const { return get(); }
 
     InstancePtr() { GC::double_ptr_store(&value, GC::NULLHandle); }
-    InstancePtr(GC::Handle const v) { GC::double_ptr_store(&value, v); }
+ //   InstancePtr(GC::Handle const v) { double_ptr_store( v); }
+
+    
+    InstancePtr(T* const v) { double_ptr_store( v); }
+
+
     template<typename Y>
     InstancePtr(const InstancePtr<Y>& o) {
-        double_ptr_store(o.getHandle());
+        double_ptr_store(o.get());
     }
     template<typename Y>
     void operator = (const InstancePtr<Y>& o) {
-        store(o.getHandle());
+        store(o.get());
     }
     template<typename Y>
     InstancePtr(const RootPtr<Y>& o);
@@ -203,13 +208,13 @@ struct RootLetter : public RootLetterBase
     virtual void mark() { 
         //memtest();
         Collectable* c = value.get_collectable();
-        if (c != nullptr) 
+        if (c != collectable_null) 
             c->collectable_mark(); }
 
     RootLetter(RootLetter&&) = delete;
 
     RootLetter() {}
-    RootLetter(GC::Handle v) :value(v){}
+    RootLetter(T* v) :value(v){}
 };
 
 template <typename T>
@@ -217,7 +222,7 @@ struct RootPtr
 {
     RootLetter<T>* var;
 
-    void operator = (GC::Handle o)
+    void operator = (T*o)
     {
         var->value.store(o);
     }
@@ -225,13 +230,13 @@ struct RootPtr
     template <typename Y>
     void operator = (const RootPtr<Y>& v)
     {
-        var->value.store(v.var->value.getHandle());
+        var->value.store(v.var->value.get());
     }
 
     template <typename Y>
     void operator = (const InstancePtr<Y>& v)
     {
-        var->value.store(v.getHandle());
+        var->value.store(v.get());
     }
     template <typename U>
     auto operator[](U i) { return (*get())[i]; }
@@ -253,31 +258,26 @@ struct RootPtr
         return var->value.get();
     }
     template <typename Y>
-    RootPtr(Y* const v) :var(new RootLetter<T>(v->getHandle())) 
-    {
-        GC::log_alloc(sizeof(*var));
-    }
-    //explicit 
-        RootPtr(GC::Handle const v) :var(new RootLetter<T>(v))
+    RootPtr(Y* const v) :var(new RootLetter<T>(v)) 
     {
         GC::log_alloc(sizeof(*var));
     }
    // RootPtr(RootPtr<T>&& v) = delete;
 
-    RootPtr(const RootPtr<T>& v) :var(new RootLetter<T>(v.var->value.getHandle())) {
+    RootPtr(const RootPtr<T>& v) :var(new RootLetter<T>(v.var->value.get())) {
         //v.var->memtest();
         //var->memtest();
         GC::log_alloc(sizeof(*var));
     }
 
     template <typename Y>
-    RootPtr (const RootPtr<Y>  &v) :var(new RootLetter<T>(v.var->value.getHandle())){
+    RootPtr (const RootPtr<Y>  &v) :var(new RootLetter<T>(v.var->value.get())){
         //v.var->memtest();
         //var->memtest();
         GC::log_alloc(sizeof(*var));
     }
     template <typename Y>
-    RootPtr (const InstancePtr<Y> &v) :var(new RootLetter<T>(v.getHandle())) {
+    RootPtr (const InstancePtr<Y> &v) :var(new RootLetter<T>(v.get())) {
         //var->memtest();
         GC::log_alloc(sizeof(*var));
     }
@@ -320,13 +320,13 @@ template<typename T>
 template<typename Y>
 InstancePtr<T>::InstancePtr(const RootPtr<Y>& v) {
     //v->memtest();
-    double_ptr_store(v.var->value.getHandle());
+    double_ptr_store(v.var->value.get());
 }
 
 template<typename T>
 template<typename Y>
 void InstancePtr<T>::operator = (const RootPtr<Y>& v) {
-    store(v.var->value.getHandle());
+    store(v.var->value.get());
 }
 
 namespace GC {
@@ -370,14 +370,14 @@ protected:
     {
  
     }
-    Collectable(_sentinel_) : CircularDoubleList(_SENTINEL_), collectable_back_ptr(nullptr) , collectable_marked(true)//, deleted(false)
+    Collectable(_sentinel_) : CircularDoubleList(_SENTINEL_), collectable_back_ptr(collectable_null) , collectable_marked(true)//, deleted(false)
     {
         
     }
 
 public:
     GC::Handle myHandle;
-    GC::Handle getHandle() { return myHandle; }
+    GC::Handle getHandle() const { return myHandle; }
     //void memtest() const { 
         //ENSURE(!deleted); 
     //    if (deleted) std::cout << ':';
@@ -393,7 +393,7 @@ public:
     void collectable_mark()
     {
         //memtest();
-        Collectable* n=nullptr;
+        Collectable* n=collectable_null;
         Collectable* c = this;
         //if (deleted) std::cout << '!';
         if (collectable_marked) return;
@@ -408,7 +408,7 @@ public:
             for (;;) {
                 if (t >= 0) {
                     n = c->index_into_instance_vars(t)->get_collectable();
-                    if (n != nullptr) {
+                    if (n != collectable_null) {
                        // if (n->deleted) std::cout << '*';
 
                         if (!n->collectable_marked) {
@@ -460,7 +460,7 @@ public:
     }
     Collectable(Collectable&&) = delete;
 
-    Collectable() :CircularDoubleList(_START_, GC::ScanListsByThread[GC::MyThreadNumber]->collectables[GC::ActiveIndex]), collectable_back_ptr(nullptr), collectable_marked(false)//,deleted(false) 
+    Collectable() :CircularDoubleList(_START_, GC::ScanListsByThread[GC::MyThreadNumber]->collectables[GC::ActiveIndex]), collectable_back_ptr(collectable_null), collectable_marked(false)//,deleted(false) 
     {
         }
 
@@ -514,13 +514,13 @@ struct CollectableBlock : public Collectable
     bool pop_back(const RootPtr<T>& o) {
         if (size == 0) return false;
         o = block[--size];
-        block[size] = nullptr;
+        block[size] = collectable_null;
         return true;
     }
     bool pop_back(const InstancePtr<T>& o) {
         if (size == 0) return false;
         o = block[--size];
-        block[size] = nullptr;
+        block[size] = collectable_null;
         return true;
     }
     CollectableBlock():size(0), reserved(0){}
@@ -535,13 +535,13 @@ struct CollectableBlock : public Collectable
     }
     void clear()
     {
-        for (int i = 0; i < size; ++i) block[i] = nullptr;
+        for (int i = 0; i < size; ++i) block[i] = collectable_null;
         size = 0;
     }
     void resize(int s)
     {
         assert(s < 32);
-        while (size > s)block[--size] = nullptr;
+        while (size > s)block[--size] = collectable_null;
         size = s;
     }
 };
@@ -564,7 +564,7 @@ struct Collectable2Block : public Collectable
         if (size == 32*32) return false;
         ++size;
         if (b_size() > b_size(-1)) {
-            if (block[b_size() - 1].get() == nullptr) block[b_size() - 1] = cnew (CollectableBlock<T>);
+            if (block[b_size() - 1].get() == collectable_null) block[b_size() - 1] = cnew (CollectableBlock<T>);
             if (b_size() > b_reserved) b_reserved = b_size();
         }
         return block[b_size() - 1]->push_back(o);
@@ -594,7 +594,7 @@ struct Collectable2Block : public Collectable
     InstancePtr<T>& insure(int i) {
         int j = 31&(i >> 5);
         for (int k = b_size()-1; k <= j; ++k) {
-            if (block[k].get() == nullptr) {
+            if (block[k].get() == collectable_null) {
                 block[k] = cnew( CollectableBlock<T>);
                 if (k<j) block[k]->insure((1<<6)-1);
             }
@@ -646,7 +646,7 @@ struct Collectable3Block : public Collectable
         if (size == 32 * 32 * 32) return false;
         ++size;
         if (b_size() > b_size(-1)) {
-            if (block[b_size()-1].get() == nullptr) block[b_size()-1] = cnew (Collectable2Block<T>);
+            if (block[b_size()-1].get() == collectable_null) block[b_size()-1] = cnew (Collectable2Block<T>);
             if (b_size() > b_reserved) b_reserved = b_size();
         }
         return block[b_size() - 1]->push_back(o);
@@ -673,7 +673,7 @@ struct Collectable3Block : public Collectable
     InstancePtr<T>& insure(int i) {
         int j = 31 & (i >> 10);
         for (int k = b_size() - 1; k <= j; ++k) {
-            if (block[k].get() == nullptr) {
+            if (block[k].get() == collectable_null) {
                 block[k] = cnew (Collectable2Block<T>);
                 if (k < j) block[k]->insure((1 << 11) - 1);
             }
@@ -727,7 +727,7 @@ struct Collectable4Block : public Collectable
         if (size == 32 * 32 * 32) return false;
         ++size;
         if (b_size() > b_size(-1)) {
-            if (block[b_size() - 1].get() == nullptr) block[b_size() - 1] = cnew (Collectable3Block<T>);
+            if (block[b_size() - 1].get() == collectable_null) block[b_size() - 1] = cnew (Collectable3Block<T>);
             if (b_size() > b_reserved) b_reserved = b_size();
         }
         return block[b_size() - 1]->push_back(o);
@@ -756,7 +756,7 @@ struct Collectable4Block : public Collectable
     InstancePtr<T>& insure(int i) {
         int j = 31 & (i >> 15);
         for (int k = b_size() - 1; k <= j; ++k) {
-            if (block[k].get() == nullptr) {
+            if (block[k].get() == collectable_null) {
                 block[k] = cnew (Collectable3Block<T>);
                 if (k < j) block[k]->insure((1 << 16) - 1);
             }
@@ -918,7 +918,7 @@ public:
     void push_back(const RootPtr<T> v)
     {
         if (data->size == data->reserve) resize(data->reserve << 1);
-        if (v == nullptr) data->resize(size() + 1);
+        if (v == collectable_null) data->resize(size() + 1);
         else data->push_back(*v.get());
     }
     T* operator[](int i) { return (*data)[i]; }
@@ -952,13 +952,13 @@ struct CollectableVectoreUse : public Collectable
     bool pop_back(RootPtr<T>& o) {
         if (size == 0) return false;
         o = (data.get())[--size];
-        (data.get())[size] = GC::NULLHandle;
+        (data.get())[size] = (T*)collectable_null;
         return true;
     }
     bool pop_back(InstancePtr<T>& o) {
         if (size == 0) return false;
         o = (data.get())[--size];
-        (data.get())[size] = GC::NULLHandle;
+        (data.get())[size] = (T*)collectable_null;
         return true;
     }
     InstancePtr<T>& at (int i) {
@@ -970,13 +970,13 @@ struct CollectableVectoreUse : public Collectable
     }
     void clear()
     {
-        for (int i = 0; i < size; ++i) (data.get())[i] = GC::NULLHandle;
+        for (int i = 0; i < size; ++i) (data.get())[i] = (T*)collectable_null;
         size = 0;
     }
     bool resize(int s, const RootPtr<T>& exemplar)
     {
         if (s > reserved) return false;
-        if (s < reserved) while (size > s)(data.get())[--size] = GC::NULLHandle;
+        if (s < reserved) while (size > s)(data.get())[--size] = (T*)collectable_null;
         else while (size < s)(data.get())[size++] = exemplar;
         if (size > scan_size) scan_size = size;
         return true;
@@ -984,7 +984,7 @@ struct CollectableVectoreUse : public Collectable
     bool resize(int s, InstancePtr<T>& exemplar)
     {
         if (s > reserved) return false;
-        if (s < reserved) while (size > s)(data.get())[--size] = GC::NULLHandle;
+        if (s < reserved) while (size > s)(data.get())[--size] = (T*)collectable_null;
         else while (size < s)(data.get())[size++] = exemplar;
         if (size > scan_size) scan_size = size;
         return true;
@@ -992,7 +992,7 @@ struct CollectableVectoreUse : public Collectable
     bool resize(int s)
     {
         if (s > reserved) return false;
-        if (s < reserved) while (size > s)(data.get())[--size] = GC::NULLHandle;
+        if (s < reserved) while (size > s)(data.get())[--size] = (T*)collectable_null;
         size = s;
         return true;
     }
@@ -1270,7 +1270,7 @@ class CollectableVector : public Collectable
         {
             (*this)[i] = (*this)[i + 1];
         }
-        (*this)[s] = nullptr;
+        (*this)[s] = collectable_null;
         data->size = s;
         return iterator(*this,t.pos+1);
     }
@@ -1289,7 +1289,7 @@ class CollectableVector : public Collectable
             (*this)[i] = (*this)[i + d];
         }
         for (;i<size();++i)
-            (*this)[i] = nullptr;
+            (*this)[i] = collectable_null;
 
         data->size = s;
         return iterator(*this, f.pos + 1);
@@ -1509,10 +1509,10 @@ public:
 
 };
 
-class CollectableSentinal : public Collectable
+class CollectableSentinel : public Collectable
 {
 public:
-    CollectableSentinal():Collectable(_SENTINEL_) {}
+    CollectableSentinel():Collectable(_SENTINEL_) {}
     virtual int total_instance_vars() const { return 0; }
     //not snapshot, includes ones that could be null because they're live
     virtual size_t my_size() const { return sizeof(*this); }

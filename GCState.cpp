@@ -77,16 +77,18 @@ namespace GC {
     std::thread CollectionThread;
 
     void one_collect();
-
+    thread_local int HandlesUsedThread = 0;
     void log_alloc(size_t a)
     {
         ThreadAllocated += a;
         if (++AggregateLogAlloc > 300) {
+            HandlesUsedThread += 600;
             AggregateLogAlloc = 0;
             Allocated += ThreadAllocated;
             ThreadAllocated = 0;
-            if (Allocated > TriggerPoint) {
-                if (Allocated.exchange(0) > TriggerPoint) {
+            if (Allocated > TriggerPoint || HandlesUsedThread> HandlesPerThread) {
+                if (Allocated.exchange(0) > TriggerPoint || HandlesUsedThread > HandlesPerThread) {
+                    HandlesUsedThread = 0;
                     if (CombinedThread) single_thread_event = true;
                     else SetEvent(StartCollectionEvent);
                 }
@@ -340,7 +342,7 @@ namespace GC {
         StateStoreType gc = get_state();
         assert(gc.state.phase == PhaseEnum::COLLECTING);
         StateStoreType to;
-        Collectable* t=nullptr;
+        Collectable* t=collectable_null;
         RootLetterBase* r = nullptr;
         bool released = false;
         do {
@@ -536,7 +538,7 @@ namespace GC {
             ScanLists* s = new ScanLists;
 
             for (int i = 0; i < 2; ++i) {
-                s->collectables[i] = Handles[cnew (CollectableSentinal())].ptr;
+                s->collectables[i] = Handles[cnew (CollectableSentinel())->getHandle()].ptr;
                 s->roots[i] = new RootLetterBase(_SENTINEL_);
             }
             ScanListsByThread[MyThreadNumber] = s;
