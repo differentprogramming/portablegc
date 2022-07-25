@@ -40,9 +40,10 @@
 class Collectable;
 class CollectableSentinel;
 
-extern CollectableSentinel CollectableNull;
+//extern CollectableSentinel CollectableNull;
 
-#define collectable_null ((Collectable*)&CollectableNull)
+//#define collectable_null ((Collectable*)&CollectableNull)
+#define collectable_null nullptr
 namespace GC {
     typedef uint32_t Handle;
     const Handle EndOfHandleFreeList = 0xffffffff;
@@ -60,7 +61,7 @@ namespace GC {
     {
         SnapPtr temp;
         temp.handles[1] = temp.handles[0] = v;
-        reinterpret_cast<std::atomic_uint64_t*>(&dest->combined)->store(temp.combined, std::memory_order_seq_cst);
+        reinterpret_cast<std::atomic_uint64_t*>(&dest->combined)->store(temp.combined, std::memory_order_relaxed);
     }
 
     inline void single_ptr_store(SnapPtr* dest, Handle v)
@@ -184,7 +185,9 @@ namespace GC {
 
     inline void MergeAllHandleLists()
     {
-        for (int i = 0; i < MAX_COLLECTED_THREADS; ++i) MergeHandleList(i);
+        for (int i = 0; i < MAX_COLLECTED_THREADS; ++i) {
+            MergeHandleList(i);
+        }
     }
    
     inline Handle AllocateHandle()

@@ -234,15 +234,22 @@ namespace GC {
         for (int i = 0; i < MAX_COLLECTED_THREADS; ++i) {
             if (nullptr == ScanListsByThread[i]) continue;
             auto itc = ScanListsByThread[i]->collectables[(ActiveIndex ^ 1)]->iterate();
+            int count = 0, nmarked=0, ndeleted=0;
 
             while (++itc) {
+                ++count;
+                if (static_cast<Collectable*>(&*itc)->collectable_marked == 0xbf) ++nmarked;
+                if (static_cast<Collectable*>(&*itc)->deleted == 0xfeebfdcb)++ndeleted;
+            }
+            std::cout << count << " collectables on thread " << i << " "<< nmarked<<"marked "<<ndeleted<<" deleted already\n";
+            while (++itc) {
                 if (exit_program_flag) return;
-                if (!static_cast<Collectable*>(&*itc)->collectable_marked) {
+                if (static_cast<Collectable*>(&*itc)->collectable_marked!=0xbf && &*itc!= collectable_null) {
                     itc.remove();
                     ++cr;
                 }
                 else {
-                    static_cast<Collectable*>(&*itc)->collectable_marked = false;
+                    static_cast<Collectable*>(&*itc)->collectable_marked = 0;
                     static_cast<Collectable*>(&*itc)->clean_after_collect();
                 }
             }
@@ -542,6 +549,7 @@ namespace GC {
 
             for (int i = 0; i < 2; ++i) {
                 s->collectables[i] = Handles[cnew (CollectableSentinel())->getHandle()].ptr;
+                s->collectables[i]->circular_double_list_is_sentinel = true;
                 s->roots[i] = new RootLetterBase(_SENTINEL_);
             }
             ScanListsByThread[MyThreadNumber] = s;

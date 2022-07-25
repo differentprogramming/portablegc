@@ -8,5 +8,5 @@ namespace GC {
 void InstancePtrBase::mark()
 {
     Collectable* s = get_collectable();
-    if (s != collectable_null) s->collectable_mark();
+    if (s!= collectable_null) s->collectable_mark();
 }

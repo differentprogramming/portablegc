@@ -74,7 +74,7 @@ namespace GC {
         }
         HandleList[0] = 1;
         Handles[0].ptr = collectable_null;
-        CollectableNull.myHandle = 0;
+        //CollectableNull.myHandle = 0;
     }
 
 };

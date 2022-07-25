@@ -17,7 +17,7 @@ The hash table uses linear probing and stays at least 4 times as big as the numb
 
 #define INITIAL_HASH_SIZE 1024
 
-extern CollectableSentinel hash_marker, CollectableNull;
+extern CollectableSentinel CollectableNull;
 
 
 template<typename K, typename V>

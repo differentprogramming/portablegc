@@ -16,14 +16,17 @@ class CircularDoubleList;
 void merge_from_to(CircularDoubleList* source, CircularDoubleList* dest);
 namespace GC {
     void merge_collected();
+    void init_thread(bool combine_thread);
 }
 class CircularDoubleList 
 {
     friend void merge_from_to(CircularDoubleList* source, CircularDoubleList* dest);
     friend void GC::merge_collected();
+    friend void GC::init_thread(bool);
     //because every collectable class has to be derived from this, give things obscure names so they don't polute the namespace for user instance variables.
     CircularDoubleList* circular_double_list_prev;
     CircularDoubleList* circular_double_list_next;
+protected:
     bool circular_double_list_is_sentinel;
 public:
 
@@ -104,13 +107,13 @@ public:
 template <typename T>
 class InstancePtr : public InstancePtrBase
 {
-    void double_ptr_store(T* v) { GC::double_ptr_store(&value,  v->getHandle()); }
+    void double_ptr_store( T* const v) { GC::double_ptr_store(&value, v == nullptr ? GC::NULLHandle : v->getHandle()); }
 public:
 
     GC::Handle getHandle() const { return GC::load(&value); }
     T* get() const { return (T*)GC::Handles[GC::load(&value)].ptr; }
 
-    void store(T* const v) { GC::write_barrier(&value,  v->getHandle()); }
+    void store( T* const v) { GC::write_barrier(&value, v==nullptr?GC::NULLHandle: v->getHandle()); }
     template<typename U>
     auto operator[](U i) const { return (*get())[i]; }
     T& operator*() const { return *get(); }
@@ -120,19 +123,23 @@ public:
  //   InstancePtr(GC::Handle const v) { double_ptr_store( v); }
 
     
-    InstancePtr(T* const v) { double_ptr_store( v); }
+    explicit InstancePtr( T*  v) { double_ptr_store( v); }
 
 
     template<typename Y>
-    InstancePtr(const InstancePtr<Y>& o) {
+    explicit InstancePtr(const InstancePtr<Y>& o) {
         double_ptr_store(o.get());
+    }
+    template<typename Y>
+    void operator = (Y *const o) {
+        store(o);
     }
     template<typename Y>
     void operator = (const InstancePtr<Y>& o) {
         store(o.get());
     }
     template<typename Y>
-    InstancePtr(const RootPtr<Y>& o);
+    explicit InstancePtr(const RootPtr<Y>& o);
     template<typename Y>
     void operator = (const RootPtr<Y>& o);
 };
@@ -223,7 +230,7 @@ struct RootPtr
 {
     RootLetter<T>* var;
 
-    void operator = (T*o)
+    void operator = ( T* const o)
     {
         var->value.store(o);
     }
@@ -234,11 +241,21 @@ struct RootPtr
         var->value.store(v.var->value.get());
     }
 
+//    template <typename Y>
+//    void operator = (const InstancePtr<Y>& v)
+//    {
+//        var->value.store(v.get());
+//    }
     template <typename Y>
-    void operator = (const InstancePtr<Y>& v)
+    void operator = (Y* v)
     {
-        var->value.store(v.get());
-    }
+        var->value.store(v);
+    }   
+    //template <typename Y>
+  //  void operator = (Y* const v)
+  //  {
+  //      var->value.store(v);
+  //  }
     template <typename U>
     auto operator[](U i) { return (*get())[i]; }
     template <typename U>
@@ -367,33 +384,42 @@ protected:
 
     uint32_t collectable_back_ptr_from_counter;//came from nth snapshot ptr
 #ifdef ONE_COLLECT_THREAD
-    bool collectable_marked; //only one collection thread
+    uint8_t collectable_marked; //only one collection thread
 #else
     std::atomic_bool marked;
 #endif
     virtual ~Collectable() 
     {
- 
+        GC::DeallocHandleInGC(myHandle);
     }
-    Collectable(_sentinel_) : CircularDoubleList(_SENTINEL_), collectable_back_ptr(collectable_null) , collectable_marked(true)//, deleted(false)
+    Collectable(_sentinel_) : CircularDoubleList(_SENTINEL_), collectable_back_ptr(collectable_null) , collectable_marked(0xbf), deleted(0)
     {
         
     }
 
 public:
     GC::Handle myHandle;
-    bool deleted;
+    int32_t deleted;
     GC::Handle getHandle() const { return myHandle; }
     void memtest() const { 
-        ENSURE(!deleted); 
-        if (deleted) std::cout << ':';
+        ENSURE(deleted != 0xfeebfdcb);
+        ENSURE(deleted == 0);
+        if (deleted == 0xfeebfdcb) std::cout << ':';
     }
     void fake_delete() {
-        if (deleted) {
+        if (deleted== 0xfeebfdcb) {
             std::cout << '$';
             return;
         }
-       deleted = true; disconnect();  
+        else if (deleted != 0) {
+            std::cout << 'C';
+            //return;
+        }
+        if (collectable_marked != 0 && collectable_marked != 0xbf) {
+            std::cout << 'c';
+        }
+       deleted = 0xfeebfdcb; disconnect();  
+       GC::DeallocHandleInGC(myHandle);
     }
     //to keep from blowing the stack when marking a long chain, this is coded as a loop instead of being recursive and back pointers and context
     //is stored in the objects themselves instead of on the stack.
@@ -403,9 +429,9 @@ public:
         Collectable* n=collectable_null;
         Collectable* c = this;
         //if (deleted) std::cout << '!';
-        if (collectable_marked) return;
+        if (collectable_marked==0xbf) return;
 #ifdef ONE_COLLECT_THREAD
-        collectable_marked = true;
+        collectable_marked = 0xbf;
         {
 #else
         bool got_it = marked.exchange(true);
@@ -418,9 +444,9 @@ public:
                     if (n != collectable_null) {
                         if (n->deleted) std::cout << '*';
 
-                        if (!n->collectable_marked) {
+                        if (n->collectable_marked!=0xbf) {
 #ifdef ONE_COLLECT_THREAD
-                            n->collectable_marked = true;
+                            n->collectable_marked = 0xbf;
                             {
 #else
                             got_it = marked.exchange(true);
@@ -467,7 +493,7 @@ public:
     }
     Collectable(Collectable&&) = delete;
 
-    Collectable() :CircularDoubleList(_START_, GC::ScanListsByThread[GC::MyThreadNumber]->collectables[GC::ActiveIndex]), collectable_back_ptr(collectable_null), collectable_marked(false),deleted(false) 
+    Collectable() :CircularDoubleList(_START_, GC::ScanListsByThread[GC::MyThreadNumber]->collectables[GC::ActiveIndex]), collectable_back_ptr(collectable_null), collectable_marked(0),deleted(false) 
     {
         }
 
@@ -942,46 +968,55 @@ struct CollectableVectoreUse : public Collectable
 
     CollectableVectoreUse(int s) :size(0), scan_size(0),reserved(s), data( new InstancePtr<T>[s]) {}
     int total_instance_vars() const {
+        memtest();
         return scan_size;
     }
     InstancePtrBase* index_into_instance_vars(int num) {
+        memtest();
         return data.get() + num;
     }
     size_t my_size() const { return sizeof(*this) + sizeof(InstancePtr<T>) * reserved; }
 
 
     bool push_back(const RootPtr<T>& o) {
+        memtest();
         if (size >= reserved) return false;
         (data.get())[size++] = o;
         if (size > scan_size) scan_size = size;
         return true;
     }
     bool pop_back(RootPtr<T>& o) {
+        memtest();
         if (size == 0) return false;
         o = (data.get())[--size];
         (data.get())[size] = (T*)collectable_null;
         return true;
     }
     bool pop_back(InstancePtr<T>& o) {
+        memtest();
         if (size == 0) return false;
         o = (data.get())[--size];
         (data.get())[size] = (T*)collectable_null;
         return true;
     }
     InstancePtr<T>& at (int i) {
+        memtest();
         if (i < 0 || i >= size) throw std::out_of_range("CollectableVector index out of range");
         return (data.get())[i];
     }
     InstancePtr<T>& operator[](int i) {
+        memtest();
         return (data.get())[i];
     }
     void clear()
     {
+        memtest();
         for (int i = 0; i < size; ++i) (data.get())[i] = (T*)collectable_null;
         size = 0;
     }
     bool resize(int s, const RootPtr<T>& exemplar)
     {
+        memtest();
         if (s > reserved) return false;
         if (s < reserved) while (size > s)(data.get())[--size] = (T*)collectable_null;
         else while (size < s)(data.get())[size++] = exemplar;
@@ -990,6 +1025,7 @@ struct CollectableVectoreUse : public Collectable
     }
     bool resize(int s, InstancePtr<T>& exemplar)
     {
+        memtest();
         if (s > reserved) return false;
         if (s < reserved) while (size > s)(data.get())[--size] = (T*)collectable_null;
         else while (size < s)(data.get())[size++] = exemplar;
@@ -998,6 +1034,7 @@ struct CollectableVectoreUse : public Collectable
     }
     bool resize(int s)
     {
+        memtest();
         if (s > reserved) return false;
         if (s < reserved) while (size > s)(data.get())[--size] = (T*)collectable_null;
         size = s;
@@ -1005,6 +1042,7 @@ struct CollectableVectoreUse : public Collectable
     }
     bool push_front(const RootPtr<T>& o)
     {
+        memtest();
         if (size >= reserved) return false;
         if (size > 0) {
             (*this)[size] = (*this)[size - 1];
@@ -1032,9 +1070,11 @@ class CollectableVector : public Collectable
     InstancePtr<CollectableVectoreUse<T> > data;
     public:
     int total_instance_vars() const {
+        memtest();
         return 1;
     }
     InstancePtrBase* index_into_instance_vars(int num) {
+        memtest();
         return &data;
     }
     size_t my_size() const { return sizeof(*this); }
@@ -1197,21 +1237,27 @@ class CollectableVector : public Collectable
         }
     };
     iterator begin() {
+        memtest();
         return iterator(*this);
     }
     const_iterator begin() const {
+        memtest();
         return const_iterator(*this);
     }
     const_iterator cbegin() {
+        memtest();
         return const_iterator(*this);
     }
     iterator end() {
+        memtest();
         return iterator(*this,size());
     }
     const_iterator end() const {
+        memtest();
         return const_iterator(*this,size());
     }
     const_iterator cend() {
+        memtest();
         return const_iterator(*this, size());
     }
 
@@ -1219,6 +1265,7 @@ class CollectableVector : public Collectable
 
     void assign(const RootPtr<CollectableVector<T> > &o)
     {
+        memtest();
         if (this == o.get()) return;
         clear();
         int s = o->size();
@@ -1226,6 +1273,7 @@ class CollectableVector : public Collectable
     }
     void assign(InstancePtr<CollectableVector<T> >& o)
     {
+        memtest();
         if (this == o.get()) return;
         clear();
         int s = o->size();
@@ -1238,39 +1286,55 @@ class CollectableVector : public Collectable
     CollectableVector(int s, InstancePtr<T>& exemplar) : data(cnew (CollectableVectoreUse<T>(s << 1))) { resize(s, exemplar); }
     void push_back(const RootPtr<T>& o)
     {
+        memtest();
         if (!data->push_back(o)) {
             resize(size() + 1);
             data->push_back(o);
         }
     }
-    int size() const { return data->size; }
+    int size() const 
+    { 
+        memtest();
+        return data->size;
+    }
     bool pop_back(RootPtr<T>& o) 
     {
+        memtest();
         return data->pop_back(o);
     }
     bool pop_back(InstancePtr<T>& o)
     {
+        memtest();
         return data->pop_back(o);
     }
     RootPtr<T> operator[](int i) const
     {
+        memtest();
         return (*data)[i];
     }
     InstancePtr<T>& operator[](int i)
     {
+        memtest();
         return (*data)[i];
     }
     RootPtr<T> at(int i) const
     {
+        memtest();
         return data->at(i);
     }
     InstancePtr<T>& at (int i)
     {
+        memtest();
         return data->at(i);
     }
-    void clear() { data->clear();  }
+    void clear() 
+    { 
+        memtest();
+        data->clear();
+    }
 
     iterator erase(const_iterator t) {
+        memtest();
         if (t.pos >= size) return end();
         int s = size() - 1;
         for (int i=t.pos;i<s;++i)
@@ -1283,6 +1347,7 @@ class CollectableVector : public Collectable
     }
 
     iterator erase(const_iterator f, const_iterator t) {
+        memtest();
         if (f.pos >= size) return end();
         if (f.pos >= t.pos) return iterator(*this, f.pos);
 
@@ -1304,6 +1369,7 @@ class CollectableVector : public Collectable
 
     iterator insert(const_iterator f, const RootPtr<T>& a)
     {
+        memtest();
         int p = f.pos;
         int s = size();
         if (p > s) p = s;
@@ -1317,6 +1383,7 @@ class CollectableVector : public Collectable
 
     iterator insert(const_iterator f, int n, const RootPtr<T>& a)
     {
+        memtest();
         int p = f.pos;
         if (n<1) return iterator(*this, p);
         int s = size();
@@ -1330,6 +1397,7 @@ class CollectableVector : public Collectable
     }
     iterator insert(const_iterator f, const_iterator t, const RootPtr<T>& a)
     {
+        memtest();
         int n = t.pos - f.pos;
         int p = f.pos;
         if (n < 1) return iterator(*this, p);
@@ -1347,12 +1415,14 @@ class CollectableVector : public Collectable
     }
     void swap(CollectableVector& o)
     {
+        memtest();
         RootPtr<T> t = data;
         data = o.data;
         o.data = t;
     }
     void resize(int s, const RootPtr<T>& exemplar)
     {
+        memtest();
         if (!data->resize(s, exemplar)) {
             RootPtr<CollectableVectoreUse<T> > data_held_for_collect = data;
             data = cnew (CollectableVectoreUse<T>(this, s << 1));
@@ -1373,6 +1443,7 @@ class CollectableVector : public Collectable
     }   
     void resize(int s, InstancePtr<T>& exemplar)
     {
+        memtest();
         if (!data->resize(s,exemplar)) {
             RootPtr<CollectableVectoreUse<T> > data_held_for_collect = data;
             data = cnew( CollectableVectoreUse<T>(this, s << 1));
@@ -1392,12 +1463,14 @@ class CollectableVector : public Collectable
         }
     }
     void resize(int s) {
+        memtest();
         reserve(s);
         data->size = s;
     }
     //sets the reservation to at least s, not the size
     void reserve(int s)
     {
+        memtest();
         if (!data->resize(s)) {
             RootPtr<CollectableVectoreUse<T> > data_held_for_collect = data;
             data = cnew (CollectableVectoreUse<T>(this, s << 1));
@@ -1412,6 +1485,7 @@ class CollectableVector : public Collectable
         }
     }
     void push_front(const RootPtr<T>& o) {
+        memtest();
         int s = size()+1;
         if (!data->resize(s)) {
             RootPtr<CollectableVectoreUse<T> > data_held_for_collect = data;
@@ -1439,19 +1513,23 @@ class CollectableVector : public Collectable
         }
     }
     RootPtr<T> front() const {
+        memtest();
         return at(0);
     }
 
     InstancePtr<T>& front() {
+        memtest();
         return at(0);
     }
 
     RootPtr<T> back() const {
+        memtest();
         return at(size() - 1);
     }
 
 
     InstancePtr<T>& back() {
+        memtest();
         return at(size() - 1);
     }
 
@@ -1519,9 +1597,11 @@ public:
 class CollectableSentinel : public Collectable
 {
 public:
-    CollectableSentinel():Collectable(_SENTINEL_) {}
+    CollectableSentinel() :Collectable(_SENTINEL_) {
+        circular_double_list_is_sentinel = false;
+    }
     virtual int total_instance_vars() const { return 0; }
     //not snapshot, includes ones that could be null because they're live
-    virtual size_t my_size() const { return sizeof(*this); }
+    virtual size_t my_size() const { return 0; }
     virtual InstancePtrBase* index_into_instance_vars(int num) { return nullptr; }
 };
