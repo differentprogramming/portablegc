@@ -211,10 +211,10 @@ template <typename T>
 struct RootLetter : public RootLetterBase
 {
     InstancePtr<T> value;
-    virtual GC::SnapPtr* double_ptr() { memtest(); 
+    virtual GC::SnapPtr* double_ptr() { MEM_TEST(); 
     return &value.value; }
     virtual void mark() { 
-        memtest();
+        MEM_TEST();
         Collectable* c = value.get_collectable();
         if (c != collectable_null) 
             c->collectable_mark(); }
@@ -241,11 +241,11 @@ struct RootPtr
         var->value.store(v.var->value.get());
     }
 
-//    template <typename Y>
-//    void operator = (const InstancePtr<Y>& v)
-//    {
-//        var->value.store(v.get());
-//    }
+    template <typename Y>
+    void operator = (const InstancePtr<Y>& v)
+    {
+        var->value.store(v.get());
+    }
     template <typename Y>
     void operator = (Y* v)
     {
@@ -283,20 +283,26 @@ struct RootPtr
    // RootPtr(RootPtr<T>&& v) = delete;
 
     RootPtr(const RootPtr<T>& v) :var(new RootLetter<T>(v.var->value.get())) {
+#ifdef NDEBUG
         v.var->memtest();
         var->memtest();
+#endif
         GC::log_alloc(sizeof(*var));
     }
 
     template <typename Y>
     RootPtr (const RootPtr<Y>  &v) :var(new RootLetter<T>(v.var->value.get())){
+#ifdef NDEBUG
         v.var->memtest();
         var->memtest();
+#endif
         GC::log_alloc(sizeof(*var));
     }
     template <typename Y>
-    RootPtr (const InstancePtr<Y> &v) :var(new RootLetter<T>(v.get())) {
+    explicit RootPtr (const InstancePtr<Y> &v) :var(new RootLetter<T>(v.get())) {
+#ifdef NDEBUG
         var->memtest();
+#endif
         GC::log_alloc(sizeof(*var));
     }
     RootPtr() :var(new RootLetter<T>)
@@ -312,42 +318,54 @@ struct RootPtr
 template< class T, class U >
 RootPtr<T> static_pointer_cast(const RootPtr<U>& v) noexcept
 {
+#ifdef NDEBUG
     v->memtest();
+#endif
     return RootPtr<T>(static_cast<T*>(v.var->value.get()));
 }
 
 template< class T, class U >
 RootPtr<T> const_pointer_cast(const RootPtr<U>& v) noexcept
 {
+#ifdef NDEBUG
     v->memtest();
+#endif
     return RootPtr<T>(const_cast<T*>(v.var->value.get()));
 }
 
 template< class T, class U >
 RootPtr<T> const_dynamic_cast(const RootPtr<U>& v) noexcept
 {
+#ifdef NDEBUG
     v->memtest();
+#endif
     return RootPtr<T>(dynamic_cast<T*>(v.var->value.get()));
 }
 
 template< class T, class U >
 RootPtr<T> const_reinterpret_cast(const RootPtr<U>& v) noexcept
 {
+#ifdef NDEBUG
     v->memtest();
+#endif
     return RootPtr<T>(reinterpret_cast<T*>(v.var->value.get()));
 }
 
 template<typename T>
 template<typename Y>
 InstancePtr<T>::InstancePtr(const RootPtr<Y>& v) {
+#ifdef NDEBUG
     v->memtest();
+#endif
     double_ptr_store(v.var->value.get());
 }
 
 template<typename T>
 template<typename Y>
 void InstancePtr<T>::operator = (const RootPtr<Y>& v) {
+#ifdef NDEBUG
     v->memtest();
+#endif
     store(v.var->value.get());
 }
 
@@ -425,7 +443,7 @@ public:
     //is stored in the objects themselves instead of on the stack.
     void collectable_mark()
     {
-        memtest();
+        MEM_TEST();
         Collectable* n=collectable_null;
         Collectable* c = this;
         //if (deleted) std::cout << '!';
@@ -968,81 +986,82 @@ struct CollectableVectoreUse : public Collectable
 
     CollectableVectoreUse(int s) :size(0), scan_size(0),reserved(s), data( new InstancePtr<T>[s]) {}
     int total_instance_vars() const {
-        memtest();
+        MEM_TEST();
         return scan_size;
     }
     InstancePtrBase* index_into_instance_vars(int num) {
-        memtest();
+        MEM_TEST();
         return data.get() + num;
     }
     size_t my_size() const { return sizeof(*this) + sizeof(InstancePtr<T>) * reserved; }
 
 
     bool push_back(const RootPtr<T>& o) {
-        memtest();
+        MEM_TEST();
         if (size >= reserved) return false;
         (data.get())[size++] = o;
         if (size > scan_size) scan_size = size;
         return true;
     }
     bool pop_back(RootPtr<T>& o) {
-        memtest();
+        MEM_TEST();
         if (size == 0) return false;
-        o = (data.get())[--size];
+        o = (data.get())[--size].get();
         (data.get())[size] = (T*)collectable_null;
         return true;
     }
     bool pop_back(InstancePtr<T>& o) {
-        memtest();
+        MEM_TEST();
         if (size == 0) return false;
         o = (data.get())[--size];
         (data.get())[size] = (T*)collectable_null;
         return true;
     }
     InstancePtr<T>& at (int i) {
-        memtest();
+        MEM_TEST();
         if (i < 0 || i >= size) throw std::out_of_range("CollectableVector index out of range");
         return (data.get())[i];
     }
     InstancePtr<T>& operator[](int i) {
-        memtest();
+        MEM_TEST();
         return (data.get())[i];
     }
     void clear()
     {
-        memtest();
+        MEM_TEST();
         for (int i = 0; i < size; ++i) (data.get())[i] = (T*)collectable_null;
         size = 0;
     }
     bool resize(int s, const RootPtr<T>& exemplar)
     {
-        memtest();
+        MEM_TEST();
         if (s > reserved) return false;
-        if (s < reserved) while (size > s)(data.get())[--size] = (T*)collectable_null;
+        if (s < size) while (size > s)(data.get())[--size] = (T*)collectable_null;
         else while (size < s)(data.get())[size++] = exemplar;
         if (size > scan_size) scan_size = size;
         return true;
     }
     bool resize(int s, InstancePtr<T>& exemplar)
     {
-        memtest();
+        MEM_TEST();
         if (s > reserved) return false;
-        if (s < reserved) while (size > s)(data.get())[--size] = (T*)collectable_null;
+        if (s < size) while (size > s)(data.get())[--size] = (T*)collectable_null;
         else while (size < s)(data.get())[size++] = exemplar;
         if (size > scan_size) scan_size = size;
         return true;
     }
     bool resize(int s)
     {
-        memtest();
+        MEM_TEST();
         if (s > reserved) return false;
-        if (s < reserved) while (size > s)(data.get())[--size] = (T*)collectable_null;
+        if (s < size) while (size > s)(data.get())[--size] = (T*)collectable_null;
         size = s;
+        if (size > scan_size) scan_size = size;
         return true;
     }
     bool push_front(const RootPtr<T>& o)
     {
-        memtest();
+        MEM_TEST();
         if (size >= reserved) return false;
         if (size > 0) {
             (*this)[size] = (*this)[size - 1];
@@ -1057,6 +1076,10 @@ struct CollectableVectoreUse : public Collectable
         if (size > scan_size) scan_size = size;
         return true;
     }
+    void update_scan_size()
+    {
+        if (size > scan_size) scan_size = size;
+    }
 };
 
 
@@ -1070,11 +1093,11 @@ class CollectableVector : public Collectable
     InstancePtr<CollectableVectoreUse<T> > data;
     public:
     int total_instance_vars() const {
-        memtest();
+        MEM_TEST();
         return 1;
     }
     InstancePtrBase* index_into_instance_vars(int num) {
-        memtest();
+        MEM_TEST();
         return &data;
     }
     size_t my_size() const { return sizeof(*this); }
@@ -1165,8 +1188,8 @@ class CollectableVector : public Collectable
         RootPtr<CollectableVector<T> > v;
         int pos;
         explicit iterator():pos(0) {  }
-        explicit iterator(const RootPtr<CollectableVector<T> > &v) :pos(0) {  }
-
+        explicit iterator(const RootPtr<CollectableVector<T> > &v) :v(v),pos(0) {  }
+        explicit iterator(const RootPtr<CollectableVector<T> >& v, int p) :v(v),pos(p) {  }
         iterator(const CollectableVector<T>::const_iterator &t) :v(t.v), pos(t.pos) {}
         iterator(const CollectableVector<T>::iterator &t) :v(t.v), pos(t.pos) {}
         
@@ -1237,35 +1260,35 @@ class CollectableVector : public Collectable
         }
     };
     iterator begin() {
-        memtest();
-        return iterator(*this);
+        MEM_TEST();
+        return iterator(this);
     }
     const_iterator begin() const {
-        memtest();
-        return const_iterator(*this);
+        MEM_TEST();
+        return const_iterator(this);
     }
     const_iterator cbegin() {
-        memtest();
-        return const_iterator(*this);
+        MEM_TEST();
+        return const_iterator(this);
     }
     iterator end() {
-        memtest();
-        return iterator(*this,size());
+        MEM_TEST();
+        return iterator(this,size());
     }
     const_iterator end() const {
-        memtest();
-        return const_iterator(*this,size());
+        MEM_TEST();
+        return const_iterator(this,size());
     }
     const_iterator cend() {
-        memtest();
-        return const_iterator(*this, size());
+        MEM_TEST();
+        return const_iterator(this, size());
     }
 
     bool empty() const { return size() == 0; }
 
     void assign(const RootPtr<CollectableVector<T> > &o)
     {
-        memtest();
+        MEM_TEST();
         if (this == o.get()) return;
         clear();
         int s = o->size();
@@ -1273,7 +1296,7 @@ class CollectableVector : public Collectable
     }
     void assign(InstancePtr<CollectableVector<T> >& o)
     {
-        memtest();
+        MEM_TEST();
         if (this == o.get()) return;
         clear();
         int s = o->size();
@@ -1286,68 +1309,69 @@ class CollectableVector : public Collectable
     CollectableVector(int s, InstancePtr<T>& exemplar) : data(cnew (CollectableVectoreUse<T>(s << 1))) { resize(s, exemplar); }
     void push_back(const RootPtr<T>& o)
     {
-        memtest();
+        MEM_TEST();
         if (!data->push_back(o)) {
-            resize(size() + 1);
+            reserve(size()+1);
             data->push_back(o);
         }
     }
     int size() const 
     { 
-        memtest();
+        MEM_TEST();
         return data->size;
     }
     bool pop_back(RootPtr<T>& o) 
     {
-        memtest();
+        MEM_TEST();
         return data->pop_back(o);
     }
     bool pop_back(InstancePtr<T>& o)
     {
-        memtest();
+        MEM_TEST();
         return data->pop_back(o);
     }
     RootPtr<T> operator[](int i) const
     {
-        memtest();
-        return (*data)[i];
+        MEM_TEST();
+        return data->data.get()[i];
     }
     InstancePtr<T>& operator[](int i)
     {
-        memtest();
-        return (*data)[i];
+        MEM_TEST();
+        return data->data.get()[i];
     }
     RootPtr<T> at(int i) const
     {
-        memtest();
+        MEM_TEST();
         return data->at(i);
     }
     InstancePtr<T>& at (int i)
     {
-        memtest();
+        MEM_TEST();
         return data->at(i);
     }
     void clear() 
     { 
-        memtest();
+        MEM_TEST();
         data->clear();
     }
 
     iterator erase(const_iterator t) {
-        memtest();
+        MEM_TEST();
         if (t.pos >= size) return end();
         int s = size() - 1;
         for (int i=t.pos;i<s;++i)
         {
-            (*this)[i] = (*this)[i + 1];
+            data->data.get()[i] = data->data.get()[i + 1];
         }
-        (*this)[s] = collectable_null;
+        data->data.get()[s] = collectable_null;
         data->size = s;
+        data->update_scan_size();
         return iterator(*this,t.pos+1);
     }
 
     iterator erase(const_iterator f, const_iterator t) {
-        memtest();
+        MEM_TEST();
         if (f.pos >= size) return end();
         if (f.pos >= t.pos) return iterator(*this, f.pos);
 
@@ -1358,46 +1382,50 @@ class CollectableVector : public Collectable
         int i;
         for (i = f.pos; i < s; ++i)
         {
-            (*this)[i] = (*this)[i + d];
+            data->data.get()[i] = data->data.get()[i + d];
         }
         for (;i<size();++i)
-            (*this)[i] = collectable_null;
+            data->data.get()[i] = collectable_null;
 
         data->size = s;
+        data->update_scan_size();
+
         return iterator(*this, f.pos + 1);
     }
 
     iterator insert(const_iterator f, const RootPtr<T>& a)
     {
-        memtest();
+        MEM_TEST();
         int p = f.pos;
         int s = size();
         if (p > s) p = s;
         if (p < 0)p = 0;
         reserve(s + 1);
-        for (int i = s; i > p; --i)(*this)[i] = (*this)[i - 1];
-        (*this)[p] = a;
+        for (int i = s; i > p; --i)data->data.get()[i] = data->data.get()[i - 1];
+        data->data.get()[p] = a;
         ++data->size;
-        return iterator(*this, p);
+        data->update_scan_size();
+
+        return iterator(this, p);
     }
 
     iterator insert(const_iterator f, int n, const RootPtr<T>& a)
     {
-        memtest();
+        MEM_TEST();
         int p = f.pos;
         if (n<1) return iterator(*this, p);
         int s = size();
         if (p > s) p = s;
         if (p < 0)p = 0;
         reserve(s + n);
-        for (int i = s-1; i >= p; --i)(*this)[i+n] = (*this)[i];
-        for (int i=0;i<n;++i) (*this)[p+i] = a;
+        for (int i = s-1; i >= p; --i)data->data.get()[i+n] = data->data.get()[i];
+        for (int i=0;i<n;++i) data->data.get()[p+i] = a;
         data->size+=n;
-        return iterator(*this, p+n);
+        return iterator(this, p+n);
     }
     iterator insert(const_iterator f, const_iterator t, const RootPtr<T>& a)
     {
-        memtest();
+        MEM_TEST();
         int n = t.pos - f.pos;
         int p = f.pos;
         if (n < 1) return iterator(*this, p);
@@ -1405,24 +1433,26 @@ class CollectableVector : public Collectable
         if (p > s) p = s;
         if (p < 0)p = 0;
         reserve(s + n);
-        for (int i = s - 1; i >= p; --i)(*this)[i + n] = (*this)[i];
+        for (int i = s - 1; i >= p; --i)data->data.get()[i + n] = data->data.get()[i];
         for (int i = 0; i < n; ++i) {
-            (*this)[p + i] = *f;
+            data->data.get()[p + i] = *f;
             ++f;
         }
         data->size += n;
-        return iterator(*this, p + n);
+        data->update_scan_size();
+
+        return iterator(this, p + n);
     }
     void swap(CollectableVector& o)
     {
-        memtest();
+        MEM_TEST();
         RootPtr<T> t = data;
         data = o.data;
         o.data = t;
     }
     void resize(int s, const RootPtr<T>& exemplar)
     {
-        memtest();
+        MEM_TEST();
         if (!data->resize(s, exemplar)) {
             RootPtr<CollectableVectoreUse<T> > data_held_for_collect = data;
             data = cnew (CollectableVectoreUse<T>(this, s << 1));
@@ -1439,11 +1469,13 @@ class CollectableVector : public Collectable
                 dest[i] = exemplar;
             }
             data->size = s;
+            data->update_scan_size();
+
         }
     }   
     void resize(int s, InstancePtr<T>& exemplar)
     {
-        memtest();
+        MEM_TEST();
         if (!data->resize(s,exemplar)) {
             RootPtr<CollectableVectoreUse<T> > data_held_for_collect = data;
             data = cnew( CollectableVectoreUse<T>(this, s << 1));
@@ -1460,35 +1492,42 @@ class CollectableVector : public Collectable
                 dest[i] = exemplar;
             }
             data->size = s;
+            data->update_scan_size();
+
         }
     }
     void resize(int s) {
-        memtest();
+        MEM_TEST();
         reserve(s);
         data->size = s;
+        data->update_scan_size();
+
     }
     //sets the reservation to at least s, not the size
     void reserve(int s)
     {
-        memtest();
-        if (!data->resize(s)) {
-            RootPtr<CollectableVectoreUse<T> > data_held_for_collect = data;
-            data = cnew (CollectableVectoreUse<T>(this, s << 1));
-            InstancePtr<T> * source = data_held_for_collect.data.get();
-            InstancePtr<T> * dest = data.data.get();
+        MEM_TEST();
+        if (data->reserved < s) {
+            RootPtr<CollectableVectoreUse<T> > data_held_for_collect ( data);
+            data = cnew(CollectableVectoreUse<T>( s << 1));
+            InstancePtr<T> * source = data_held_for_collect->data.get();
+            InstancePtr<T> * dest = data->data.get();
 
             for (int i = data_held_for_collect->size - 1; i >= 0; --i) { 
                 if ((i & 1023) == 0) GC::safe_point();
                 dest[i] = source[i];
             }
-            data.size = data_held_for_collect->size;
+            data->size = data_held_for_collect->size;
+            data->update_scan_size();
+
         }
     }
     void push_front(const RootPtr<T>& o) {
-        memtest();
+        MEM_TEST();
         int s = size()+1;
-        if (!data->resize(s)) {
-            RootPtr<CollectableVectoreUse<T> > data_held_for_collect = data;
+ //       reserve(s);
+        if (!data->push_front(o)) {
+            RootPtr<CollectableVectoreUse<T> > data_held_for_collect ( data);
             data = cnew( CollectableVectoreUse<T>(s << 1));
             InstancePtr<T>* source = data_held_for_collect->data.get();
             InstancePtr<T>* dest = data->data.get();
@@ -1500,36 +1539,28 @@ class CollectableVector : public Collectable
             }
             dest[0] = o;
             data->size = s;
-        }
-        else {
-            InstancePtr<T>* dest = data->data.get();
-            int i;
-            for (i = s - 2; i >= 0; --i) {
-                if ((i & 1023) == 0) GC::safe_point();
-                dest[i + 1] = dest[i];
-            }
-            dest[0] = o;
-            data->size = s;
+            data->update_scan_size();
+
         }
     }
     RootPtr<T> front() const {
-        memtest();
+        MEM_TEST();
         return at(0);
     }
 
     InstancePtr<T>& front() {
-        memtest();
+        MEM_TEST();
         return at(0);
     }
 
     RootPtr<T> back() const {
-        memtest();
+        MEM_TEST();
         return at(size() - 1);
     }
 
 
     InstancePtr<T>& back() {
-        memtest();
+        MEM_TEST();
         return at(size() - 1);
     }
 

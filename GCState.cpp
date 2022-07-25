@@ -234,14 +234,6 @@ namespace GC {
         for (int i = 0; i < MAX_COLLECTED_THREADS; ++i) {
             if (nullptr == ScanListsByThread[i]) continue;
             auto itc = ScanListsByThread[i]->collectables[(ActiveIndex ^ 1)]->iterate();
-            int count = 0, nmarked=0, ndeleted=0;
-
-            while (++itc) {
-                ++count;
-                if (static_cast<Collectable*>(&*itc)->collectable_marked == 0xbf) ++nmarked;
-                if (static_cast<Collectable*>(&*itc)->deleted == 0xfeebfdcb)++ndeleted;
-            }
-            std::cout << count << " collectables on thread " << i << " "<< nmarked<<"marked "<<ndeleted<<" deleted already\n";
             while (++itc) {
                 if (exit_program_flag) return;
                 if (static_cast<Collectable*>(&*itc)->collectable_marked!=0xbf && &*itc!= collectable_null) {

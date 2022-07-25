@@ -37,6 +37,12 @@
 
 #define ENSURE(x) assert(x)
 
+#ifdef NDEBUG
+#define MEM_TEST()
+#else
+#define MEM_TEST memtest
+#endif
+
 class Collectable;
 class CollectableSentinel;
 

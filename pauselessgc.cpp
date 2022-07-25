@@ -18,7 +18,7 @@ public:
     InstancePtr<RandomCounted> second;
 
     void set_first(RootPtr<RandomCounted> o2, RootPtr<RandomCounted> o) {
-        memtest();
+        MEM_TEST();
         assert(o2.var->owned);
         assert(o.get() == o2.get());
         if (collectable_null != o.get()) ++o->points_at_me;
@@ -26,7 +26,7 @@ public:
         first = o;
     }
     void set_second(RootPtr<RandomCounted> o2, RootPtr<RandomCounted> o) {
-        memtest();
+        MEM_TEST();
         assert(o2.var->owned);
         assert(o.get() == o2.get());
         if (collectable_null != o.get()) ++o->points_at_me;
@@ -40,17 +40,17 @@ public:
 //        else std::cout << "*** incorrect or cycle delete. Holds "<<points_at_me<<"\n";
     }
     int total_instance_vars() const {
-        memtest();
+        MEM_TEST();
         return 2; }
     InstancePtrBase* index_into_instance_vars(int num) {
-        memtest();
+        MEM_TEST();
         switch (num) {
         case 0: return &first;
         case 1: return &second;
         }
     }
     size_t my_size() const {
-        memtest();
+        MEM_TEST();
         return sizeof(*this); }
 };
 
@@ -85,11 +85,12 @@ void mutator_thread()
             int b = vec->size();
             bunch[i] = cnew(RandomCounted(i));
             //vec->push_front(hash[index]);
-            vec->push_front(bunch[i]);
+            //vec->push_front(bunch[i]);
+            vec->insert(vec->begin(),bunch[i]);
             //assert(t);
-            //int v = vec->size();
-            //assert(v == i + 1);
-            //assert(vec[0].get() == bunch[i].get());
+            int v = vec->size();
+            assert(v == i + 1);
+            assert(vec[0].get() == bunch[i].get());
         }
         //distribution(generator);  
         for (int j = 0; j < 2; ++j) {
@@ -158,7 +159,7 @@ int main()
 {
     std::cout << "Hello World!\n";
     
-    GC::init(true);
+    GC::init();
 
    //auto m2 = std::thread(mutator_thread);
     mutator_thread();
