@@ -54,7 +54,7 @@ public:
         operator bool() { return !center->sentinel(); }
         bool operator !() { return center->sentinel(); }
     };
-    //virtual void fake_delete() = 0;
+    virtual void fake_delete() { disconnect(); }
     circular_double_list_iterator iterate() { return circular_double_list_iterator(*this); }
     bool sentinel() const { return circular_double_list_is_sentinel; }
 
@@ -177,16 +177,17 @@ namespace GC {
 struct RootLetterBase : public CircularDoubleList
 {
     bool owned;
-    //bool deleted;
+    bool was_owned;
+    bool deleted;
 
     virtual GC::SnapPtr* double_ptr() { abort(); return nullptr; }
-    //void fake_delete() { deleted = true; disconnect(); }
-    //void memtest() { 
-        //ENSURE(!deleted); 
-    //    if (deleted) std::cout << '.';
-    //}
+    void fake_delete() { deleted = true; disconnect(); }
+    void memtest() { 
+        ENSURE(!deleted); 
+        if (deleted) std::cout << '.';
+    }
     RootLetterBase(RootLetterBase&&) = delete;
-    RootLetterBase(_sentinel_): CircularDoubleList(_SENTINEL_),owned(true)//,deleted(false)
+    RootLetterBase(_sentinel_): CircularDoubleList(_SENTINEL_),owned(true),was_owned(true),deleted(false)
     {  }
     RootLetterBase();
     virtual void mark() { abort(); }
@@ -195,7 +196,7 @@ struct RootLetterBase : public CircularDoubleList
     }
 };
 
-inline RootLetterBase::RootLetterBase():CircularDoubleList(_START_,GC::ScanListsByThread[GC::MyThreadNumber]->roots[GC::ActiveIndex]),owned(true)//,deleted(false)
+inline RootLetterBase::RootLetterBase():CircularDoubleList(_START_,GC::ScanListsByThread[GC::MyThreadNumber]->roots[GC::ActiveIndex]),owned(true),was_owned(true),deleted(false)
 {
 }
 
@@ -203,10 +204,10 @@ template <typename T>
 struct RootLetter : public RootLetterBase
 {
     InstancePtr<T> value;
-    virtual GC::SnapPtr* double_ptr() { //memtest(); 
+    virtual GC::SnapPtr* double_ptr() { memtest(); 
     return &value.value; }
     virtual void mark() { 
-        //memtest();
+        memtest();
         Collectable* c = value.get_collectable();
         if (c != collectable_null) 
             c->collectable_mark(); }
@@ -265,67 +266,71 @@ struct RootPtr
    // RootPtr(RootPtr<T>&& v) = delete;
 
     RootPtr(const RootPtr<T>& v) :var(new RootLetter<T>(v.var->value.get())) {
-        //v.var->memtest();
-        //var->memtest();
+        v.var->memtest();
+        var->memtest();
         GC::log_alloc(sizeof(*var));
     }
 
     template <typename Y>
     RootPtr (const RootPtr<Y>  &v) :var(new RootLetter<T>(v.var->value.get())){
-        //v.var->memtest();
-        //var->memtest();
+        v.var->memtest();
+        var->memtest();
         GC::log_alloc(sizeof(*var));
     }
     template <typename Y>
     RootPtr (const InstancePtr<Y> &v) :var(new RootLetter<T>(v.get())) {
-        //var->memtest();
+        var->memtest();
         GC::log_alloc(sizeof(*var));
     }
     RootPtr() :var(new RootLetter<T>)
     {
         GC::log_alloc(sizeof(*var));
     }
-    ~RootPtr() { var->owned = false; }
+    ~RootPtr() { 
+        var->owned = false; 
+        if (GC::ThreadState != GC::PhaseEnum::COLLECTING) var->was_owned = false;
+    }
 };
 
 template< class T, class U >
 RootPtr<T> static_pointer_cast(const RootPtr<U>& v) noexcept
 {
-    //v->memtest();
+    v->memtest();
     return RootPtr<T>(static_cast<T*>(v.var->value.get()));
 }
 
 template< class T, class U >
 RootPtr<T> const_pointer_cast(const RootPtr<U>& v) noexcept
 {
-    //v->memtest();
+    v->memtest();
     return RootPtr<T>(const_cast<T*>(v.var->value.get()));
 }
 
 template< class T, class U >
 RootPtr<T> const_dynamic_cast(const RootPtr<U>& v) noexcept
 {
-    //v->memtest();
+    v->memtest();
     return RootPtr<T>(dynamic_cast<T*>(v.var->value.get()));
 }
 
 template< class T, class U >
 RootPtr<T> const_reinterpret_cast(const RootPtr<U>& v) noexcept
 {
-    //v->memtest();
+    v->memtest();
     return RootPtr<T>(reinterpret_cast<T*>(v.var->value.get()));
 }
 
 template<typename T>
 template<typename Y>
 InstancePtr<T>::InstancePtr(const RootPtr<Y>& v) {
-    //v->memtest();
+    v->memtest();
     double_ptr_store(v.var->value.get());
 }
 
 template<typename T>
 template<typename Y>
 void InstancePtr<T>::operator = (const RootPtr<Y>& v) {
+    v->memtest();
     store(v.var->value.get());
 }
 
@@ -377,22 +382,24 @@ protected:
 
 public:
     GC::Handle myHandle;
+    bool deleted;
     GC::Handle getHandle() const { return myHandle; }
-    //void memtest() const { 
-        //ENSURE(!deleted); 
-    //    if (deleted) std::cout << ':';
-    //}
-    //void fake_delete() {
-    //    if (deleted) {
-    //        std::cout << '$';
-    //        return;
-     //   }
-     //   deleted = true; disconnect();  }
+    void memtest() const { 
+        ENSURE(!deleted); 
+        if (deleted) std::cout << ':';
+    }
+    void fake_delete() {
+        if (deleted) {
+            std::cout << '$';
+            return;
+        }
+       deleted = true; disconnect();  
+    }
     //to keep from blowing the stack when marking a long chain, this is coded as a loop instead of being recursive and back pointers and context
     //is stored in the objects themselves instead of on the stack.
     void collectable_mark()
     {
-        //memtest();
+        memtest();
         Collectable* n=collectable_null;
         Collectable* c = this;
         //if (deleted) std::cout << '!';
@@ -409,7 +416,7 @@ public:
                 if (t >= 0) {
                     n = c->index_into_instance_vars(t)->get_collectable();
                     if (n != collectable_null) {
-                       // if (n->deleted) std::cout << '*';
+                        if (n->deleted) std::cout << '*';
 
                         if (!n->collectable_marked) {
 #ifdef ONE_COLLECT_THREAD
@@ -460,7 +467,7 @@ public:
     }
     Collectable(Collectable&&) = delete;
 
-    Collectable() :CircularDoubleList(_START_, GC::ScanListsByThread[GC::MyThreadNumber]->collectables[GC::ActiveIndex]), collectable_back_ptr(collectable_null), collectable_marked(false)//,deleted(false) 
+    Collectable() :CircularDoubleList(_START_, GC::ScanListsByThread[GC::MyThreadNumber]->collectables[GC::ActiveIndex]), collectable_back_ptr(collectable_null), collectable_marked(false),deleted(false) 
     {
         }
 

@@ -14,6 +14,7 @@
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN 
 #include <Windows.h>
+//#include <afx.h>
 #endif
 //A library to simulate Windows events on Posix
 //I use this because, on Windows, the events don't need a mutex, so the calls should be more efficient than using condition variables etc - no possible pause caused by contention over the mutex.
@@ -34,6 +35,8 @@
 #endif
 //#include "LockFreeFIFO.h"
 
+#define ENSURE(x) assert(x)
+
 class Collectable;
 class CollectableSentinel;
 
@@ -42,7 +45,7 @@ extern CollectableSentinel CollectableNull;
 #define collectable_null ((Collectable*)&CollectableNull)
 namespace GC {
     typedef uint32_t Handle;
-
+    const Handle EndOfHandleFreeList = 0xffffffff;
 
     void log_alloc(size_t a);
     void log_array_alloc(size_t a, size_t n);
@@ -137,7 +140,7 @@ namespace GC {
 
     const int HandlesPerThread = TotalHandles / MAX_COLLECTED_THREADS;
 
-    const Handle EndOfHandleFreeList = 0xffffffff;
+
     const Handle NULLHandle = 0;//set the first handle to the nullptr
 
     extern Handle HandleList[MAX_COLLECTED_THREADS];
@@ -192,9 +195,9 @@ namespace GC {
     }
 
 
-#define cnew(A) ([&]{ auto * _AskdlfA_=new A;  GC::log_alloc(_AskdlfA_->my_size()); GC::Handle _lskdfjKJK_ = GC::AllocateHandle(); GC::Handles[_lskdfjKJK_].ptr =  _AskdlfA_; _AskdlfA_->myHandle = _lskdfjKJK_; return _AskdlfA_; })()
-#define cnew2template(A,B) ([&]{ auto * _AskdlfA_=new A,B;  GC::log_alloc(_AskdlfA_->my_size()); GC::Handle _lskdfjKJK_ = GC::AllocateHandle(); GC::Handles[_lskdfjKJK_].ptr =  _AskdlfA_; _AskdlfA_->myHandle = _lskdfjKJK_; return _AskdlfA_; })()
-#define cnew3template(A,B,C) ([&]{ auto * _AskdlfA_=new A,B,C;  GC::log_alloc(_AskdlfA_->my_size()); GC::Handle _lskdfjKJK_ = GC::AllocateHandle(); GC::Handles[_lskdfjKJK_].ptr =  _AskdlfA_; _AskdlfA_->myHandle = _lskdfjKJK_; return _AskdlfA_; })()
+#define cnew(A) ([&]{ auto * _AskdlfA_=new A;  GC::log_alloc(_AskdlfA_->my_size()); GC::Handle _lskdfjKJK_ = GC::AllocateHandle(); if (GC::EndOfHandleFreeList==_lskdfjKJK_) abort(); GC::Handles[_lskdfjKJK_].ptr =  _AskdlfA_; _AskdlfA_->myHandle = _lskdfjKJK_; return _AskdlfA_; })()
+#define cnew2template(A,B) ([&]{ auto * _AskdlfA_=new A,B;  GC::log_alloc(_AskdlfA_->my_size()); GC::Handle _lskdfjKJK_ = GC::AllocateHandle(); if (GC::EndOfHandleFreeList==_lskdfjKJK_) abort(); GC::Handles[_lskdfjKJK_].ptr =  _AskdlfA_; _AskdlfA_->myHandle = _lskdfjKJK_; return _AskdlfA_; })()
+#define cnew3template(A,B,C) ([&]{ auto * _AskdlfA_=new A,B,C;  GC::log_alloc(_AskdlfA_->my_size()); GC::Handle _lskdfjKJK_ = GC::AllocateHandle(); if (GC::EndOfHandleFreeList==_lskdfjKJK_) abort(); GC::Handles[_lskdfjKJK_].ptr =  _AskdlfA_; _AskdlfA_->myHandle = _lskdfjKJK_; return _AskdlfA_; })()
 //#define cnew_array(A,N) ([&]{ auto _NfjkasjdflN_ = N; auto _AskdlfA_=new A[_NfjkasjdflN_];  GC::log_array_alloc(_AskdlfA_[0]->my_size(),_NfjkasjdflN_); GC::Handle _lskdfjKJK_ = GC::AllocateHandle(); GC::Handles[_lskdfjKJK_].ptr =  _AskdlfA_; return _lskdfjKJK_; })()
 
     extern std::atomic_uint32_t ThreadsInGC;

@@ -191,7 +191,7 @@ namespace GC {
         exit_program_flag = true;
         SetEvent(StartCollectionEvent);
 
-        CollectionThread.join();
+        if (!CombinedThread) CollectionThread.join();
     }
 
     /*
@@ -219,7 +219,10 @@ namespace GC {
 
             while (++it) {
                 if (exit_program_flag) return;
-                static_cast<RootLetterBase*>(&*it)->mark();
+                if (static_cast<RootLetterBase*>(&*it)->was_owned) {
+                    static_cast<RootLetterBase*>(&*it)->mark();
+                    static_cast<RootLetterBase*>(&*it)->was_owned = static_cast<RootLetterBase*>(&*it)->owned;
+                }
                 if (!static_cast<RootLetterBase*>(&*it)->owned) {//special iterator lets you delete under it
                     it.remove();
                     ++rr;

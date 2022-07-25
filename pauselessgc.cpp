@@ -18,7 +18,7 @@ public:
     InstancePtr<RandomCounted> second;
 
     void set_first(RootPtr<RandomCounted> o2, RootPtr<RandomCounted> o) {
-        //memtest();
+        memtest();
         assert(o2.var->owned);
         assert(o.get() == o2.get());
         if (collectable_null != o.get()) ++o->points_at_me;
@@ -26,7 +26,7 @@ public:
         first = o;
     }
     void set_second(RootPtr<RandomCounted> o2, RootPtr<RandomCounted> o) {
-        //memtest();
+        memtest();
         assert(o2.var->owned);
         assert(o.get() == o2.get());
         if (collectable_null != o.get()) ++o->points_at_me;
@@ -40,17 +40,17 @@ public:
 //        else std::cout << "*** incorrect or cycle delete. Holds "<<points_at_me<<"\n";
     }
     int total_instance_vars() const {
-        //memtest();
+        memtest();
         return 2; }
     InstancePtrBase* index_into_instance_vars(int num) {
-        //memtest();
+        memtest();
         switch (num) {
         case 0: return &first;
         case 1: return &second;
         }
     }
     size_t my_size() const {
-        //memtest();
+        memtest();
         return sizeof(*this); }
 };
 
@@ -74,7 +74,7 @@ void mutator_thread()
     RootPtr<CollectableHashTable<CollectableString,RandomCounted> > hash = cnew2template(CollectableHashTable<CollectableString, RandomCounted>());
 
     RootPtr<CollectableVector<RandomCounted> > vec= cnew (CollectableVector<RandomCounted>());
-    for (int k = 1; k <= 5; ++k) {
+    for (int k = 1; k <= 50; ++k) {
         vec->clear();
         for (int i = 0; i < Testlen; ++i)
         {
@@ -158,11 +158,12 @@ int main()
 {
     std::cout << "Hello World!\n";
     
-    GC::init();
+    GC::init(true);
 
-   //auto m2 = std::thread(mutator_thread);
+   auto m2 = std::thread(mutator_thread);
     mutator_thread();
     GC::exit_collect_thread();
+    m2.join();
 }
 
 // Run program: Ctrl + F5 or Debug > Start Without Debugging menu
