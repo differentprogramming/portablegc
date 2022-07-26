@@ -18,7 +18,7 @@ public:
     InstancePtr<RandomCounted> second;
 
     void set_first(RootPtr<RandomCounted> o2, RootPtr<RandomCounted> o) {
-        MEM_TEST();
+        memtest();
         assert(o2.var->owned);
         assert(o.get() == o2.get());
         if (collectable_null != o.get()) ++o->points_at_me;
@@ -26,7 +26,7 @@ public:
         first = o;
     }
     void set_second(RootPtr<RandomCounted> o2, RootPtr<RandomCounted> o) {
-        MEM_TEST();
+        memtest();
         assert(o2.var->owned);
         assert(o.get() == o2.get());
         if (collectable_null != o.get()) ++o->points_at_me;
@@ -40,17 +40,17 @@ public:
 //        else std::cout << "*** incorrect or cycle delete. Holds "<<points_at_me<<"\n";
     }
     int total_instance_vars() const {
-        MEM_TEST();
+        memtest();
         return 2; }
     InstancePtrBase* index_into_instance_vars(int num) {
-        MEM_TEST();
+        memtest();
         switch (num) {
         case 0: return &first;
         case 1: return &second;
         }
     }
     size_t my_size() const {
-        MEM_TEST();
+        memtest();
         return sizeof(*this); }
 };
 
@@ -79,18 +79,18 @@ void mutator_thread()
         for (int i = 0; i < Testlen; ++i)
         {
             GC::safe_point();
-            //RootPtr<CollectableString> index = int_to_string(i);
+            RootPtr<CollectableString> index = int_to_string(i);
 
-            //hash->insert_or_assign(index, cnew(RandomCounted(i)));
+            hash->insert_or_assign(index, cnew(RandomCounted(i)));
             int b = vec->size();
-            bunch[i] = cnew(RandomCounted(i));
+            //bunch[i] = cnew(RandomCounted(i));
             //vec->push_front(hash[index]);
             //vec->push_front(bunch[i]);
-            vec->insert(vec->begin(),bunch[i]);
+            vec->insert(vec->end(), hash[index]);
             //assert(t);
             int v = vec->size();
             assert(v == i + 1);
-            assert(vec[0].get() == bunch[i].get());
+            assert(vec[i].get() == hash[index].get());
         }
         //distribution(generator);  
         for (int j = 0; j < 2; ++j) {
@@ -101,27 +101,27 @@ void mutator_thread()
                 GC::safe_point();
                 {
                     int j = distribution(generator);
-                    //RootPtr<CollectableString> jind = int_to_string(j);
+                    RootPtr<CollectableString> jind = int_to_string(j);
                     //assert(j >= 0);
                     //assert(j < Testlen);
                     //assert(!bunch[i]->deleted);
                     //assert(!bunch[j]->deleted);
-                    //RootPtr<RandomCounted> jrc = hash[jind];
-                    //hash[ind]->set_first(jrc, jrc);
-                    bunch[i]->set_first(bunch[j], bunch[j]);
+                    RootPtr<RandomCounted> jrc = hash[jind];
+                    hash[ind]->set_first(jrc, jrc);
+                    //bunch[i]->set_first(bunch[j], bunch[j]);
                     //assert(bunch[i].var->owned);
                     //assert(bunch[j].var->owned);
                 }
                 {
                     int j = distribution(generator);
-                    //RootPtr<CollectableString> jind = int_to_string(j);
-                    //RootPtr<RandomCounted> jrc = hash[jind];
+                    RootPtr<CollectableString> jind = int_to_string(j);
+                    RootPtr<RandomCounted> jrc = hash[jind];
                     //assert(j >= 0);
                     //assert(j < Testlen);
                     //assert(!bunch[i]->deleted);
                     //assert(!bunch[j]->deleted);
-                    bunch[i]->set_second(bunch[j], bunch[j]);
-                    //hash[ind]->set_second(jrc, jrc);
+                    //bunch[i]->set_second(bunch[j], bunch[j]);
+                    hash[ind]->set_second(jrc, jrc);
                     //assert(bunch[i].var->owned);
                     //assert(bunch[j].var->owned);
                 }
@@ -130,10 +130,10 @@ void mutator_thread()
             for (int i = 0; i < Testlen >> 1; ++i)
             {
                 GC::safe_point();
-                //RootPtr<CollectableString> index = int_to_string(Testlen - i - 1);
+                RootPtr<CollectableString> index = int_to_string(Testlen - i - 1);
 
-                //hash->insert_or_assign(index, cnew(RandomCounted(Testlen - i - 1)));
-                bunch[i] = cnew(RandomCounted(Testlen-i-1));
+                hash->insert_or_assign(index, cnew(RandomCounted(Testlen - i - 1)));
+                //bunch[i] = cnew(RandomCounted(Testlen-i-1));
                 //assert(bunch[i].var->owned);
                 //assert(!bunch[i]->deleted);
             }
@@ -147,7 +147,7 @@ void mutator_thread()
             assert(t);
             int s2 = vec->size();
             int h = p->identity;
-            assert(h == i);
+            assert(h == Testlen-1-i);
 
         }
         int s = vec->size();

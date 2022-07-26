@@ -314,7 +314,7 @@ struct CollectableHashTable :public Collectable
 		{
 			int OLD_HASH_SIZE = HASH_SIZE;
 			HASH_SIZE <<= 1;
-			RootPtr<CollectableInlineVector<CollectableHashEntry<K,V> > > t = data;
+			RootPtr<CollectableInlineVector<CollectableHashEntry<K,V> > > t ( data);
 			data = cnew2template(CollectableInlineVector<CollectableHashEntry<K,V> >(HASH_SIZE));
 			used = 0;
 			wasted = 0;

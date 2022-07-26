@@ -282,8 +282,16 @@ struct RootPtr
     }
    // RootPtr(RootPtr<T>&& v) = delete;
 
+    RootPtr(const InstancePtr<T>& v) :var(new RootLetter<T>(v.get())) {
+#ifndef NDEBUG
+        v->memtest();
+        var->memtest();
+#endif
+        GC::log_alloc(sizeof(*var));
+    }
+
     RootPtr(const RootPtr<T>& v) :var(new RootLetter<T>(v.var->value.get())) {
-#ifdef NDEBUG
+#ifndef NDEBUG
         v.var->memtest();
         var->memtest();
 #endif
@@ -292,19 +300,19 @@ struct RootPtr
 
     template <typename Y>
     RootPtr (const RootPtr<Y>  &v) :var(new RootLetter<T>(v.var->value.get())){
-#ifdef NDEBUG
+#ifndef NDEBUG
         v.var->memtest();
         var->memtest();
 #endif
         GC::log_alloc(sizeof(*var));
     }
-    template <typename Y>
-    explicit RootPtr (const InstancePtr<Y> &v) :var(new RootLetter<T>(v.get())) {
-#ifdef NDEBUG
-        var->memtest();
-#endif
-        GC::log_alloc(sizeof(*var));
-    }
+//    template <typename Y>
+//    RootPtr (const InstancePtr<Y> &v) :var(new RootLetter<T>(v.get())) {
+//#ifdef NDEBUG
+//        var->memtest();
+//#endif
+//        GC::log_alloc(sizeof(*var));
+//    }
     RootPtr() :var(new RootLetter<T>)
     {
         GC::log_alloc(sizeof(*var));
@@ -318,7 +326,7 @@ struct RootPtr
 template< class T, class U >
 RootPtr<T> static_pointer_cast(const RootPtr<U>& v) noexcept
 {
-#ifdef NDEBUG
+#ifndef NDEBUG
     v->memtest();
 #endif
     return RootPtr<T>(static_cast<T*>(v.var->value.get()));
@@ -327,7 +335,7 @@ RootPtr<T> static_pointer_cast(const RootPtr<U>& v) noexcept
 template< class T, class U >
 RootPtr<T> const_pointer_cast(const RootPtr<U>& v) noexcept
 {
-#ifdef NDEBUG
+#ifndef NDEBUG
     v->memtest();
 #endif
     return RootPtr<T>(const_cast<T*>(v.var->value.get()));
@@ -336,7 +344,7 @@ RootPtr<T> const_pointer_cast(const RootPtr<U>& v) noexcept
 template< class T, class U >
 RootPtr<T> const_dynamic_cast(const RootPtr<U>& v) noexcept
 {
-#ifdef NDEBUG
+#ifndef NDEBUG
     v->memtest();
 #endif
     return RootPtr<T>(dynamic_cast<T*>(v.var->value.get()));
@@ -345,7 +353,7 @@ RootPtr<T> const_dynamic_cast(const RootPtr<U>& v) noexcept
 template< class T, class U >
 RootPtr<T> const_reinterpret_cast(const RootPtr<U>& v) noexcept
 {
-#ifdef NDEBUG
+#ifndef NDEBUG
     v->memtest();
 #endif
     return RootPtr<T>(reinterpret_cast<T*>(v.var->value.get()));
@@ -354,7 +362,7 @@ RootPtr<T> const_reinterpret_cast(const RootPtr<U>& v) noexcept
 template<typename T>
 template<typename Y>
 InstancePtr<T>::InstancePtr(const RootPtr<Y>& v) {
-#ifdef NDEBUG
+#ifndef NDEBUG
     v->memtest();
 #endif
     double_ptr_store(v.var->value.get());
@@ -363,7 +371,7 @@ InstancePtr<T>::InstancePtr(const RootPtr<Y>& v) {
 template<typename T>
 template<typename Y>
 void InstancePtr<T>::operator = (const RootPtr<Y>& v) {
-#ifdef NDEBUG
+#ifndef NDEBUG
     v->memtest();
 #endif
     store(v.var->value.get());
@@ -458,23 +466,26 @@ public:
             int t = total_instance_vars() - 1;
             for (;;) {
                 if (t >= 0) {
-                    n = c->index_into_instance_vars(t)->get_collectable();
-                    if (n != collectable_null) {
-                        if (n->deleted) std::cout << '*';
+                    InstancePtrBase* b = c->index_into_instance_vars(t);
+                    if (b != nullptr) {
+                        n = b->get_collectable();
+                        if (n != collectable_null) {
+                            if (n->deleted) std::cout << '*';
 
-                        if (n->collectable_marked!=0xbf) {
+                            if (n->collectable_marked != 0xbf) {
 #ifdef ONE_COLLECT_THREAD
-                            n->collectable_marked = 0xbf;
-                            {
+                                n->collectable_marked = 0xbf;
+                                {
 #else
-                            got_it = marked.exchange(true);
-                            if (!got_it) {
+                                got_it = marked.exchange(true);
+                                if (!got_it) {
 #endif
-                                n->collectable_back_ptr_from_counter = t;
-                                n->collectable_back_ptr = c;
-                                c = n;
-                                t = c->total_instance_vars() - 1;
-                                continue;
+                                    n->collectable_back_ptr_from_counter = t;
+                                    n->collectable_back_ptr = c;
+                                    c = n;
+                                    t = c->total_instance_vars() - 1;
+                                    continue;
+                                }
                             }
                         }
                     }
@@ -861,13 +872,13 @@ template<typename T>
 class VectorOfCollectable;
 
 template<typename T>
-struct CollectableInlineVectorUse : public Collectable
+struct CollectableInlineVector : public Collectable
 {
     T* data;
     InstancePtrBase * * instance_counts;
     int total_vars;
     int size;
-    int reserve;
+    /*
     void resize(int s) {
         if (s < 0)s = 0;
         else if (s > reserve) s = reserve;
@@ -888,23 +899,23 @@ struct CollectableInlineVectorUse : public Collectable
         data[size++].T(s);
         return true;
     }
-
+    */
     T* operator [](int i)
     {
         return &data[i];
     }
 
-    CollectableInlineVectorUse(int s) :reserve(s), size(0), instance_counts(nullptr){
-        data = (T*)malloc(sizeof(T) * s);
+    CollectableInlineVector(int s) : instance_counts(nullptr),size(s){
+        data = new T [s];
         
         total_vars = 0;
-        for (int i = 0; i < size; ++i) {
+        for (int i = 0; i < s; ++i) {
             total_vars += data[i].total_instance_vars();
         }
         instance_counts = new InstancePtrBase * [total_vars];
         int t = 0;
-        for (int i = 0; i < size; ++i) {
-            for (int j = data[i].total_instance_vars() - 1; --j; j >= 0) {
+        for (int i = 0; i < s; ++i) {
+            for (int j = data[i].total_instance_vars() - 1; j >= 0; --j) {
                 instance_counts[t++] = data[i].index_into_instance_vars(j);
             }
         }
@@ -916,25 +927,19 @@ struct CollectableInlineVectorUse : public Collectable
     }
     size_t my_size() const 
     {
-        return sizeof(*this) + reserve * (sizeof(int) + sizeof(T));
+        return sizeof(*this)+size*sizeof(T)+ total_vars*sizeof(void *);
     }
     InstancePtrBase* index_into_instance_vars(int num)
     {
         return instance_counts[num];
     }
-    ~CollectableInlineVectorUse()
+    ~CollectableInlineVector()
     {
-        for (int i = 0; i < size; ++i) {
-            try {
-                data[i].~T();
-            }
-            catch(...){}
-        }
-        free(data);
+        delete [] data;
         delete[] instance_counts;
     }
 };
-
+/*
 template <typename T>
 class CollectableInlineVector : public Collectable {
     InstancePtr< CollectableInlineVectorUse<T> > data;
@@ -943,38 +948,38 @@ public:
     InstancePtrBase* index_into_instance_vars(int num) { return &data; }
     size_t my_size() const { return sizeof(*this) + data->my_size(); }
 
-    bool empty() const { return data->size == 0; }
-    void clear() const { data->resize(0); }
-    int capacity() const { return data->reserve;   }
-    void reserve(int i)
-    {
-        if (i > data->reserve) {
-            RootPtr< CollectableInlineVectorUse<T> > new_data = cnew( CollectableInlineVectorUse<T>(i));
-            for (int j = 0; j < data->size; ++j) new_data->push_back(data.data[j]);
-            data = new_data;
-        }
-    }
-    CollectableInlineVector(int i) { data = cnew  (CollectableInlineVectorUse<T>(i)); data->resize(i); }
-    CollectableInlineVector() { data = cnew(  CollectableInlineVectorUse<T> (8)); }
-    int size() { return data->size(); }
-    void resize(int i)
-    {
-        if (i > size) {
-            if (i > data->reserve) {
-                reserve(i * 2);
-            }
-        }
-        data->resize(i);
-    }
-    void push_back(const RootPtr<T> v)
-    {
-        if (data->size == data->reserve) resize(data->reserve << 1);
-        if (v == collectable_null) data->resize(size() + 1);
-        else data->push_back(*v.get());
-    }
+    //bool empty() const { return data->size == 0; }
+    //void clear() const { data->resize(0); }
+    //int capacity() const { return data->reserve;   }
+    //void reserve(int i)
+    //{
+    //    if (i > data->reserve) {
+    //        RootPtr< CollectableInlineVectorUse<T> > new_data = cnew( CollectableInlineVectorUse<T>(i));
+    //        for (int j = 0; j < data->size; ++j) new_data->push_back(data.data[j]);
+    //        data = new_data;
+    //    }
+    //}
+    CollectableInlineVector(int i) { data = cnew  (CollectableInlineVectorUse<T>(i)); /data->resize(i); }
+    //CollectableInlineVector() { data = cnew(  CollectableInlineVectorUse<T> (8)); }
+    //int size() { return data->size(); }
+    //void resize(int i)
+    //{
+    //    if (i > size) {
+    //        if (i > data->reserve) {
+    //            reserve(i * 2);
+    //        }
+    //    }
+    //    data->resize(i);
+    //}
+    //void push_back(const RootPtr<T> v)
+    //{
+    //    if (data->size == data->reserve) resize(data->reserve << 1);
+    //    if (v == collectable_null) data->resize(size() + 1);
+    //    else data->push_back(*v.get());
+    //}
     T* operator[](int i) { return (*data)[i]; }
 };
-
+*/
 template<typename T>
 struct CollectableVectoreUse : public Collectable
 {
