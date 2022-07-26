@@ -107,13 +107,15 @@ public:
 template <typename T>
 class InstancePtr : public InstancePtrBase
 {
-    void double_ptr_store( T* const v) { GC::double_ptr_store(&value, v == nullptr ? GC::NULLHandle : v->getHandle()); }
+//    void double_ptr_store( T* const v) { GC::double_ptr_store(&value, v == nullptr ? GC::NULLHandle : v->getHandle()); }
+    void double_ptr_store(T* const v) { GC::double_ptr_store(&value, v->getHandle()); }
 public:
 
     GC::Handle getHandle() const { return GC::load(&value); }
     T* get() const { return (T*)GC::Handles[GC::load(&value)].ptr; }
 
-    void store( T* const v) { GC::write_barrier(&value, v==nullptr?GC::NULLHandle: v->getHandle()); }
+//    void store(T* const v) { GC::write_barrier(&value, v == nullptr ? GC::NULLHandle : v->getHandle()); }
+    void store( T* const v) { GC::write_barrier(&value, v->getHandle()); }
     template<typename U>
     auto operator[](U i) const { return (*get())[i]; }
     T& operator*() const { return *get(); }
@@ -185,17 +187,24 @@ struct RootLetterBase : public CircularDoubleList
 {
     bool owned;
     bool was_owned;
-    bool deleted;
 
     virtual GC::SnapPtr* double_ptr() { abort(); return nullptr; }
+#ifndef NDEBUG
+    bool deleted;
+
     void fake_delete() { deleted = true; disconnect(); }
     void memtest() { 
         ENSURE(!deleted); 
         if (deleted) std::cout << '.';
     }
-    RootLetterBase(RootLetterBase&&) = delete;
-    RootLetterBase(_sentinel_): CircularDoubleList(_SENTINEL_),owned(true),was_owned(true),deleted(false)
+    RootLetterBase(_sentinel_) : CircularDoubleList(_SENTINEL_), owned(true), was_owned(true), deleted(false)
     {  }
+#else
+    RootLetterBase(_sentinel_) : CircularDoubleList(_SENTINEL_), owned(true), was_owned(true)
+    {  }
+#endif
+
+    RootLetterBase(RootLetterBase&&) = delete;
     RootLetterBase();
     virtual void mark() { abort(); }
     virtual ~RootLetterBase()
@@ -203,7 +212,10 @@ struct RootLetterBase : public CircularDoubleList
     }
 };
 
-inline RootLetterBase::RootLetterBase():CircularDoubleList(_START_,GC::ScanListsByThread[GC::MyThreadNumber]->roots[GC::ActiveIndex]),owned(true),was_owned(true),deleted(false)
+inline RootLetterBase::RootLetterBase():CircularDoubleList(_START_,GC::ScanListsByThread[GC::MyThreadNumber]->roots[GC::ActiveIndex]),owned(true),was_owned(true)
+#ifndef NDEBUG
+,deleted(false)
+#endif
 {
 }
 
@@ -408,9 +420,9 @@ protected:
     //when in a free list points to the next free element as an unbiased index into this block
     Collectable* collectable_back_ptr;
 
-    uint32_t collectable_back_ptr_from_counter;//came from nth snapshot ptr
+    unsigned int collectable_back_ptr_from_counter : 31;//came from nth snapshot ptr
 #ifdef ONE_COLLECT_THREAD
-    uint8_t collectable_marked; //only one collection thread
+    bool collectable_marked : 1; //only one collection thread
 #else
     std::atomic_bool marked;
 #endif
@@ -418,22 +430,26 @@ protected:
     {
         GC::DeallocHandleInGC(myHandle);
     }
-    Collectable(_sentinel_) : CircularDoubleList(_SENTINEL_), collectable_back_ptr(collectable_null) , collectable_marked(0xbf), deleted(0)
+    Collectable(_sentinel_) : CircularDoubleList(_SENTINEL_), collectable_back_ptr(collectable_null) , collectable_marked(false)
+#ifndef NDEBUG
+        ,deleted(0)
+#endif
     {
         
     }
 
 public:
     GC::Handle myHandle;
+#ifndef NDEBUG
+
     int32_t deleted;
-    GC::Handle getHandle() const { return myHandle; }
-    void memtest() const { 
+    void memtest() const {
         ENSURE(deleted != 0xfeebfdcb);
         ENSURE(deleted == 0);
         if (deleted == 0xfeebfdcb) std::cout << ':';
-    }
+}
     void fake_delete() {
-        if (deleted== 0xfeebfdcb) {
+        if (deleted == 0xfeebfdcb) {
             std::cout << '$';
             return;
         }
@@ -444,9 +460,12 @@ public:
         if (collectable_marked != 0 && collectable_marked != 0xbf) {
             std::cout << 'c';
         }
-       deleted = 0xfeebfdcb; disconnect();  
-       GC::DeallocHandleInGC(myHandle);
+        deleted = 0xfeebfdcb; disconnect();
+        GC::DeallocHandleInGC(myHandle);
     }
+
+#endif
+    GC::Handle getHandle() const { return myHandle; }
     //to keep from blowing the stack when marking a long chain, this is coded as a loop instead of being recursive and back pointers and context
     //is stored in the objects themselves instead of on the stack.
     void collectable_mark()
@@ -455,9 +474,9 @@ public:
         Collectable* n=collectable_null;
         Collectable* c = this;
         //if (deleted) std::cout << '!';
-        if (collectable_marked==0xbf) return;
+        if (collectable_marked) return;
 #ifdef ONE_COLLECT_THREAD
-        collectable_marked = 0xbf;
+        collectable_marked = true;
         {
 #else
         bool got_it = marked.exchange(true);
@@ -470,11 +489,13 @@ public:
                     if (b != nullptr) {
                         n = b->get_collectable();
                         if (n != collectable_null) {
+#ifndef NDEBUG
                             if (n->deleted) std::cout << '*';
+#endif
 
-                            if (n->collectable_marked != 0xbf) {
+                            if (!n->collectable_marked) {
 #ifdef ONE_COLLECT_THREAD
-                                n->collectable_marked = 0xbf;
+                                n->collectable_marked = true;
                                 {
 #else
                                 got_it = marked.exchange(true);
@@ -522,7 +543,10 @@ public:
     }
     Collectable(Collectable&&) = delete;
 
-    Collectable() :CircularDoubleList(_START_, GC::ScanListsByThread[GC::MyThreadNumber]->collectables[GC::ActiveIndex]), collectable_back_ptr(collectable_null), collectable_marked(0),deleted(false) 
+    Collectable() :CircularDoubleList(_START_, GC::ScanListsByThread[GC::MyThreadNumber]->collectables[GC::ActiveIndex]), collectable_back_ptr(collectable_null), collectable_marked(false)
+#ifndef NDEBUG
+        ,deleted(false)
+#endif
     {
         }
 

@@ -2,6 +2,8 @@
 #include "Collectable.h"
 #include <cassert>
 #ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN 
+#include <Windows.h>
 #include <Processthreadsapi.h>
 #else
 #include <sched.h>
@@ -47,9 +49,40 @@ GC transitions happen:
 2) one of the GC threads grabs a mutex over the state and runs a transition
 */
 
-using namespace neosmart;
-
 namespace GC {
+
+
+    std::mutex CollectionEventMut;
+    std::atomic_int CollectionEventId = 0;
+    std::condition_variable CollectionEventCond;
+
+    thread_local int CollectionEventRecieved = 0;
+    // Producer thread
+    void SendCollectionEvent()
+    {            
+        {
+            std::lock_guard<std::mutex> lk(CollectionEventMut);
+            ++CollectionEventId;
+        }
+        CollectionEventCond.notify_all();
+    }
+
+    // Consumer thread
+    bool WaitForCollectionEvent()
+    {
+        std::unique_lock<std::mutex> lk(CollectionEventMut);
+        CollectionEventCond.wait(lk, [] { return CollectionEventId != CollectionEventRecieved; });
+        CollectionEventRecieved = CollectionEventId;
+        return true;
+    }
+    // Consumer thread
+    bool PollCollectionEvent()
+    {
+        int c = CollectionEventId;
+        if (c == CollectionEventRecieved) return false;
+        CollectionEventRecieved = c;
+        return true;
+    }
 
 
 
@@ -65,7 +98,7 @@ namespace GC {
     thread_local int AggregateLogAlloc;
     thread_local int AggregateArrayLogAlloc;
 
-    bool single_thread_event = false;
+    std::atomic_bool single_thread_event = false;
 
     thread_local void (*write_barrier)(SnapPtr*, Handle);
 
@@ -73,7 +106,7 @@ namespace GC {
     thread_local int NotMutatingCount;
     thread_local int MyThreadNumber;
     thread_local bool CombinedThread=false;
-    neosmart_event_t StartCollectionEvent;
+    
     std::thread CollectionThread;
 
     void one_collect();
@@ -90,7 +123,7 @@ namespace GC {
                 if (Allocated.exchange(0) > TriggerPoint || HandlesUsedThread > HandlesPerThread) {
                     HandlesUsedThread = 0;
                     if (CombinedThread) single_thread_event = true;
-                    else SetEvent(StartCollectionEvent);
+                    else SendCollectionEvent();
                 }
             }
         }
@@ -105,7 +138,7 @@ namespace GC {
             if (Allocated > TriggerPoint) {
                 if (Allocated.exchange(0) > TriggerPoint) {
                     if (CombinedThread) single_thread_event = true;
-                    else SetEvent(StartCollectionEvent);
+                    else SendCollectionEvent();
                 }
             }
         }
@@ -178,7 +211,6 @@ namespace GC {
         }
         TriggerPoint = 300000000;
         if (!combine_thread) {
-            StartCollectionEvent = CreateEvent();
             CollectionThread = std::thread(collect_thread);
         }
         else {
@@ -189,7 +221,7 @@ namespace GC {
     void exit_collect_thread()
     {
         exit_program_flag = true;
-        SetEvent(StartCollectionEvent);
+        SendCollectionEvent();
 
         if (!CombinedThread) CollectionThread.join();
     }
@@ -236,12 +268,12 @@ namespace GC {
             auto itc = ScanListsByThread[i]->collectables[(ActiveIndex ^ 1)]->iterate();
             while (++itc) {
                 if (exit_program_flag) return;
-                if (static_cast<Collectable*>(&*itc)->collectable_marked!=0xbf && &*itc!= collectable_null) {
+                if (!static_cast<Collectable*>(&*itc)->collectable_marked && &*itc!= collectable_null) {
                     itc.remove();
                     ++cr;
                 }
                 else {
-                    static_cast<Collectable*>(&*itc)->collectable_marked = 0;
+                    static_cast<Collectable*>(&*itc)->collectable_marked = false;
                     static_cast<Collectable*>(&*itc)->clean_after_collect();
                 }
             }
@@ -433,7 +465,7 @@ namespace GC {
     void safe_point()
     {
         if (CombinedThread) {
-            if (single_thread_event || WaitForEvent(StartCollectionEvent,0)==0) {
+            if (single_thread_event ) {
                 single_thread_event = false;
                 one_collect();
             }
@@ -554,34 +586,11 @@ namespace GC {
 
     void exit_thread()
     {
-        bool success = false;
-        StateStoreType gc = get_state();
-        do {
-            StateStoreType to;
-            to.state = gc.state;
-            if (ThreadState == PhaseEnum::COLLECTING) {
-                to.state.threads_in_collection--;
-            }
-            else if (ThreadState == PhaseEnum::NOT_COLLECTING)
-            {
-                to.state.threads_out_of_collection--;
-            }
-            else {
-                to.state.threads_not_mutating--;
-            }
-
-            success = compare_set_state(&gc, to);
-        } while (!success);
+        thread_leave_mutation();
         ThreadSlots[MyThreadNumber] = false;
 //        ThreadsInGC--;
     }
 
-    struct ThreadGCRAII
-    {
-        ThreadGCRAII() { init_thread(); }
-        ~ThreadGCRAII() { exit_thread(); }
-
-    };
 
 
     //if syncing packages up object and root for collecting then it has to still happen even if a thread has opted out
@@ -703,8 +712,8 @@ namespace GC {
     void collect_thread()
     {
         for (;;) {
-            if (exit_program_flag) break;
-           if (0 != WaitForEvent(StartCollectionEvent)) return; //there was an error, get out of here
+           if (exit_program_flag) break;
+           WaitForCollectionEvent(); 
            if (exit_program_flag) break;
            one_collect();
         }

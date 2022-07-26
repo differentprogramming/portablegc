@@ -36,9 +36,6 @@
     <ClCompile Include="spooky.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="pevents\pevents.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="GCState.h">
@@ -54,9 +51,6 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="spooky.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="pevents\pevents.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

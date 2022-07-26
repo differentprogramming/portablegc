@@ -1,4 +1,4 @@
 #include "CollectableHash.h"
 
 
-//CollectableSentinel CollectableNull;
+CollectableSentinel CollectableNull;

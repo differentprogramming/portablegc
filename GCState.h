@@ -10,30 +10,6 @@
 #include <random>
 #include <signal.h>
 
-// NB: On Windows, you must include Winbase.h/Synchapi.h/Windows.h before pevents.h
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN 
-#include <Windows.h>
-//#include <afx.h>
-#endif
-//A library to simulate Windows events on Posix
-//I use this because, on Windows, the events don't need a mutex, so the calls should be more efficient than using condition variables etc - no possible pause caused by contention over the mutex.
-#include "pevents/pevents.h"
-
-#ifdef _WIN32
-#define __unused__  [[maybe_unused]]
-#else
-#define __unused__ __attribute__((unused))
-#endif
-
-#if defined(_MSC_VER)
-/* Microsoft C/C++-compatible compiler */
-#include <intrin.h>
-
-#elif defined(__x86_64__)
-#include <x86intrin.h>
-#endif
-//#include "LockFreeFIFO.h"
 
 #define ENSURE(x) assert(x)
 
@@ -46,10 +22,10 @@
 class Collectable;
 class CollectableSentinel;
 
-//extern CollectableSentinel CollectableNull;
+extern CollectableSentinel CollectableNull;
 
-//#define collectable_null ((Collectable*)&CollectableNull)
-#define collectable_null nullptr
+#define collectable_null ((Collectable*)&CollectableNull)
+//#define collectable_null nullptr
 namespace GC {
     typedef uint32_t Handle;
     const Handle EndOfHandleFreeList = 0xffffffff;
@@ -224,7 +200,7 @@ namespace GC {
     void exit_thread();
     struct ThreadRAII
     {
-        ThreadRAII() { init_thread(); }
+        ThreadRAII() { if (!CombinedThread) init_thread(); }
         ~ThreadRAII() { exit_thread(); }
     };
     void thread_leave_mutation();
