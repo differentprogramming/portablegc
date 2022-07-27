@@ -171,6 +171,14 @@ InstancePtr<T> reinterpret_pointer_cast(const InstancePtr<U>& v) noexcept
 
 class Collectable;
 struct RootLetterBase;
+
+//There is one ScanLists struct per thread
+//ActiveIndex take the value 0 or 1 in each successive garbage collection
+//collectables[ActiveIndex] is the double linked ring list that all new collectable objects go in
+//between GCs it stores ALL collectable objects
+//collectables[2] holds the sublist of objects that existed during the collection phase (when the write barrier didn't write the snapshot) even after the lists are merged so that the 
+//the lists are scanned in order to restore the snapshot, no time is wasted on objects created AFTER the double write barrier was restored.
+//the same goes for roots[ActiveIndex] and roots[2] but for root variables instead of objects
 namespace GC {
     struct ScanLists
     {
@@ -182,7 +190,13 @@ namespace GC {
     extern int ActiveIndex;
 }
 
-
+//Ok roots are complicated.  Because the snapshot of roots is important until the next garbage collection even if after a root disappears,
+//root are divided into a letter and an envelope. The visible part is the envelope, and what that is destroyed the letter remains until the
+//next collection.  However only roots that were active at the moment the collection started are need to be scanned, thus "was_owned" to hold
+//that information. In theory we could delete root letters when there is no collection going on, but I realized that late and I would have
+//to add another phase to the gc to enable that, because it is also not safe to delete roots when the gc is walking the root list to 
+//restore the snapshot and that does happen outside of the collection phases.
+//
 struct RootLetterBase : public CircularDoubleList
 {
     bool owned;

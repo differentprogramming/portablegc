@@ -48,33 +48,76 @@ collect cells that weren't reachable as separate scan, doesn't stop new collecti
 
 #include "CollectableHash.h"
 
+
 namespace GC {
-     Handle GCHandleListHead[MAX_COLLECTED_THREADS];
-     Handle GCHandleListTail[MAX_COLLECTED_THREADS];
 
-    typedef uint32_t Handle;
 
+
+
+    //*******************
+
+  
+    LockFreeLIFO<Handle, HandleBlocks + MAX_COLLECTED_THREADS+1> HandleBlockQueue;
+    LockFreeLIFO<Handle, MAX_COLLECTED_THREADS * 10000> ReleaseHandlesQueue;
     Handle HandleList[MAX_COLLECTED_THREADS];
-
-
     HandleType Handles[TotalHandles];
 
-    void init_handle_lists()
+    int unqueued_handles = 0;
+    int prev_unqueued_handle = EndOfHandleFreeList;
+
+    void init_handle_blocks()
     {
-        int handle = 0;
-        for(int i=0;i< MAX_COLLECTED_THREADS;++i)
-        { 
-            HandleList[i] = handle;
-            for (int j = 0; j < HandlesPerThread; ++j)
-            {
-                Handles[j+handle].list = handle+j+1;
-            }
-            handle += HandlesPerThread;
-            Handles[handle-1].list = EndOfHandleFreeList;
+        for (int i = 0; i < MAX_COLLECTED_THREADS; ++i) {
+            HandleList[i] = EndOfHandleFreeList;
+        }
+        for (int i = 1; i < TotalHandles; ++i)
+        {
+            DeallocHandleInGC(i);
         }
         HandleList[0] = 1;
         Handles[0].ptr = collectable_null;
         CollectableNull.myHandle = 0;
     }
+
+    int GrabHandleList()
+    {
+        int queue_pos = HandleBlockQueue.pop_fifo();
+        int ret = HandleBlockQueue.all_links[queue_pos].data;
+        HandleBlockQueue.push_free(queue_pos);
+        return ret;
+    }
+
+
+
+    void FreeThreadHandles()
+    {
+        Handle next = HandleList[MyThreadNumber];
+        if (next != EndOfHandleFreeList) {
+            int queue_pos = HandleBlockQueue.pop_free();
+            if (queue_pos != -1) {
+                ReleaseHandlesQueue.all_links[queue_pos].data = next;
+                ReleaseHandlesQueue.push_fifo(queue_pos);
+            }
+        }
+    }
+
+    void FreeThreadHandlesInGC() {
+        for (;;) {
+            int queue_pos = ReleaseHandlesQueue.pop_fifo();
+            if (queue_pos == -1) break;
+            int n = ReleaseHandlesQueue.all_links[queue_pos].data;
+            ReleaseHandlesQueue.push_free(queue_pos);
+            for (;;) {
+                int m = Handles[n].list;
+                DeallocHandleInGC(n);
+                if (m == EndOfHandleFreeList) break;
+                n = m;
+            }
+        }
+    }
+
+
+
+
 
 };

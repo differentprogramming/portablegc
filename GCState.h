@@ -10,6 +10,8 @@
 #include <random>
 #include <signal.h>
 
+#include "LockFreeLIFO.h"
+
 
 #define ENSURE(x) assert(x)
 
@@ -29,7 +31,118 @@ extern CollectableSentinel CollectableNull;
 namespace GC {
     typedef uint32_t Handle;
     const Handle EndOfHandleFreeList = 0xffffffff;
+    
+    const int MAX_COLLECTED_THREADS = 256;
 
+    union HandleType
+    {
+        Collectable* ptr;
+        Handle list;
+    };
+    const int HandleBlocks = 8192;
+    extern LockFreeLIFO<Handle, HandleBlocks + MAX_COLLECTED_THREADS + 1> HandleBlockQueue;
+    extern LockFreeLIFO<Handle, MAX_COLLECTED_THREADS * 10000> ReleaseHandlesQueue;
+    const int HandlesPerBlock = 16384;
+    const int TotalHandles = HandlesPerBlock * 8192;//about 134 million
+  
+    extern Handle HandleList[MAX_COLLECTED_THREADS];
+    extern HandleType Handles[TotalHandles];
+
+    extern int unqueued_handles;
+    extern int prev_unqueued_handle;
+
+    extern thread_local int MyThreadNumber;
+
+    int GrabHandleList();
+
+    inline Handle AllocateHandle()
+    {
+        Handle next = HandleList[MyThreadNumber];
+        if (next == EndOfHandleFreeList) next = GrabHandleList();
+        HandleList[MyThreadNumber] = Handles[next].list;
+        return next;
+    }
+
+    inline void DeallocHandleInGC(int pos)
+    {
+        ++unqueued_handles;
+        Handles[pos].list = prev_unqueued_handle;
+        prev_unqueued_handle = pos;
+        if (unqueued_handles == HandlesPerBlock) {
+            int queue_pos = HandleBlockQueue.pop_free();
+            HandleBlockQueue.all_links[queue_pos].data = pos;
+            HandleBlockQueue.push_fifo(queue_pos);
+            prev_unqueued_handle = EndOfHandleFreeList;
+            unqueued_handles = 0;
+        }
+    }
+
+    const Handle NULLHandle = 0;//set the first handle to the nullptr
+
+    /*
+    const int TotalHandles = 100000000;
+
+    const int HandlesPerThread = TotalHandles / MAX_COLLECTED_THREADS;
+
+
+
+    extern Handle HandleList[MAX_COLLECTED_THREADS];
+    extern Handle GCHandleListHead[MAX_COLLECTED_THREADS];
+    extern Handle GCHandleListTail[MAX_COLLECTED_THREADS];
+
+    int get_thread_from_handle(int l)
+    {
+        return l / HandlesPerThread;
+    }
+
+    union HandleType
+    {
+        Collectable* ptr;
+        Handle list;
+    };
+
+    extern HandleType Handles[TotalHandles];
+
+    inline void init_before_gc()
+    {
+        for (int i = 0; i < MAX_COLLECTED_THREADS; ++i)
+        {
+            GCHandleListTail[i] = GCHandleListHead[i] = EndOfHandleFreeList;
+        }
+    }
+
+    inline void DeallocHandleInGC(Handle l)
+    {
+        int thread = get_thread_from_handle(l);
+
+        Handles[l].list = GCHandleListHead[thread];
+        if (GCHandleListTail[thread] == EndOfHandleFreeList) GCHandleListTail[thread] = l;
+
+        GCHandleListHead[thread] = l;
+    }
+
+    inline void MergeHandleList(int thread) {
+        if (GCHandleListTail[thread] != EndOfHandleFreeList)
+        {
+            Handles[GCHandleListTail[thread]].list = HandleList[thread];
+            HandleList[thread] = GCHandleListHead[thread];
+        }
+    }
+
+    inline void MergeAllHandleLists()
+    {
+        for (int i = 0; i < MAX_COLLECTED_THREADS; ++i) {
+            MergeHandleList(i);
+        }
+    }
+
+    inline Handle AllocateHandle()
+    {
+        Handle next = HandleList[MyThreadNumber];
+        HandleList[MyThreadNumber] = Handles[next].list;
+        return next;
+    }
+*/ 
     void log_alloc(size_t a);
     void log_array_alloc(size_t a, size_t n);
 
@@ -99,8 +212,6 @@ namespace GC {
         uint8_t threads_out_of_collection;
         PhaseEnum phase;
     };
-
-    const int MAX_COLLECTED_THREADS = 10;
  
 
     typedef uint64_t GCStateWhole;
@@ -116,68 +227,8 @@ namespace GC {
 
     extern thread_local PhaseEnum ThreadState;
     extern thread_local int NotMutatingCount;
-    extern thread_local int MyThreadNumber;
     extern thread_local bool CombinedThread;
 
-    const int TotalHandles = 100000000;
-
-    const int HandlesPerThread = TotalHandles / MAX_COLLECTED_THREADS;
-
-
-    const Handle NULLHandle = 0;//set the first handle to the nullptr
-
-    extern Handle HandleList[MAX_COLLECTED_THREADS];
-    extern Handle GCHandleListHead[MAX_COLLECTED_THREADS];
-    extern Handle GCHandleListTail[MAX_COLLECTED_THREADS];
-
-   
-    union HandleType
-    {
-        Collectable* ptr;
-        Handle list;
-    };
-
-    extern HandleType Handles[TotalHandles];
-
-    inline void init_before_gc()
-    {
-        for (int i = 0; i < MAX_COLLECTED_THREADS; ++i)
-        {
-            GCHandleListTail[i] = GCHandleListHead[i] = EndOfHandleFreeList;
-        }
-    }
-
-    inline void DeallocHandleInGC(Handle l)
-    {
-        int thread = l / HandlesPerThread;
-
-        Handles[l].list = GCHandleListHead[thread];
-        if (GCHandleListTail[thread] == EndOfHandleFreeList) GCHandleListTail[thread] = l;
-
-        GCHandleListHead[thread] = l;
-    }
-
-    inline void MergeHandleList(int thread) {
-        if (GCHandleListTail[thread] != EndOfHandleFreeList)
-        {
-            Handles[GCHandleListTail[thread]].list = HandleList[thread];
-            HandleList[thread] = GCHandleListHead[thread];
-        }
-    }
-
-    inline void MergeAllHandleLists()
-    {
-        for (int i = 0; i < MAX_COLLECTED_THREADS; ++i) {
-            MergeHandleList(i);
-        }
-    }
-   
-    inline Handle AllocateHandle()
-    {
-        Handle next = HandleList[MyThreadNumber];
-        HandleList[MyThreadNumber] = Handles[next].list;
-        return next;
-    }
 
 
 #define cnew(A) ([&]{ auto * _AskdlfA_=new A;  GC::log_alloc(_AskdlfA_->my_size()); GC::Handle _lskdfjKJK_ = GC::AllocateHandle(); if (GC::EndOfHandleFreeList==_lskdfjKJK_) abort(); GC::Handles[_lskdfjKJK_].ptr =  _AskdlfA_; _AskdlfA_->myHandle = _lskdfjKJK_; return _AskdlfA_; })()

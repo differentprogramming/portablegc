@@ -51,7 +51,11 @@ GC transitions happen:
 
 namespace GC {
 
-
+    //standard C++ replacement for windows events.
+    //The reason the hidden variable is atomic is so that it can be polled.
+    //That will only be useful if we ever create multiple collection threads... so maybe I should change that for now.
+    //The event works, not by setting a bool but by incrementing a counter.  If a thread local version of the counter isn't
+    //up to date then you've missed at least one event.
     std::mutex CollectionEventMut;
     std::atomic_int CollectionEventId = 0;
     std::condition_variable CollectionEventCond;
@@ -85,8 +89,54 @@ namespace GC {
     }
 
 
-
+    //a list representing all threads-in-the-gc.  A walk the array and do an atomic/compare/exchange algorithm is the way a thread gets its thread number
+    //obviously thread safe and non-blocking
     std::atomic_bool ThreadSlots[MAX_COLLECTED_THREADS];
+
+    //holds the current state of the gc.
+    //A union type so that it can be loaded, stored, compared atomically (always in memory_order_seq_cst)
+    //holds the phase NOT_COLLECTING, COLLECTING, or RESTORING_SNAPSHOT,
+    //the phase type also has a phase that's only meant to be stored in a thread's own state "ThreadState" (which mirrors this).
+    //NOT_MUTATING is the state of a thread that has opted out of mutation 
+    //There is also an EXIT state for exitting the program but it isn't used.  Instead "exit_program_flag" is used to tell programs not to 
+    //bother syncing with the gc anymore, the program is ending.
+    //But actually you should end the mutation threads before setting exit_program_flag, thus getting rid of the possibility that the program
+    //will run out of memory with the GC not running.
+    //State also holds 
+    //         uint8_t threads_not_mutating;
+    //         uint8_t threads_in_collection;
+    //         uint8_t threads_in_sweep;
+    //         uint8_t threads_out_of_collection;
+    //
+    // threads_not_mutating is the count of threads that have currently opted out of mutation and therefore don't have to be counted out
+    // of the current phase and into the next one.
+    // threads_out_of_collection counts the threads mutating when there is no collection going on.
+    // to start a collection, set the state to COLLECTING
+    // then block all the threads at safe_point() until all of the threads count out of threads_out_of_collection and count into threads_out_of_collection
+    // Note that while the mutating threads are blocked on safe_point() the collection thread is blocked in _start_collection().
+    // once all of the threads are blocking, the collecting thread swaps the memory barrier from one that makes snapshots to one that only stores locally.
+    // It also switches the gc nursery to a different set of lists by inverting the bit in ActiveIndex.  New objects and new roots go in a different list
+    // from then on, so that the snapshot of old lists can be scanned without seeing the new entries.
+    // then it releases all threads and continues to _do_collection. That starts by calling init_before_gc which prepares a ring list for each thread
+    // which will hold all of the object handles that are freed along with each object freed.
+    // then it scans the roots, marking all of the objects, while deleting the snapshot of roots that no longer exist in the program
+    // then it scans all of the objects, deleting those that aren't marked.  I know that's literally a sweep, and that's not related to "threads_in_sweep"
+    // the "sweep" phase is actually a sweep to restore the snapshot, not a sweep to delete unmarked objects.
+    // then the collector goes to _end_collection_start_restore_snapshot().
+    // At this point the state changes to RESTORING_SNAPSHOT and all of the threads block at safe_point.
+    // The GC switches the write barrier back to writing snapshots and merges the old object and root lists back into the nursery ones.  It also merges
+    // the recovered handles back into the handle lists for each thread.  Then it releases the mutation threads.
+    // The collection thread goes to _do_restore_snapshot(). _do_restore_snapshot does a fast but imperfect job of restoring the snapshot by copying the
+    // current value to the snapshot, but without using atomic locked instructions.  Any mistakes this cause will be fixed in the next stage after
+    // all of the threads have counted out again and flushed their caches doing so.
+    // Then the collector runs _end_sweep() which sets the phase to NOT_COLLECTING, counts all of the threads out from threads_in_sweep into threads_out_of_collection
+    // (while they block at safe_point). Then the collector goes to _do_finalize_snapshot().
+    // _do_finalize_snapshot() scans all of the pointers looking for ones where the fast way of restoring the snapshot failed.  Then it uses 
+    // compare-exchange in memory_order_seq_cst to restore those few if there are any. 
+    // After that, collection is over and if the collector is in its own thread it waits for an event from the allocator to wake it back up to run again.
+    // If it shares a thread with a mutator, it just goes back to that mutator.
+
+
 
     StateStoreType State;
 
@@ -111,21 +161,32 @@ namespace GC {
 
     void one_collect();
     thread_local int HandlesUsedThread = 0;
+
+    void alloc_merge()
+    {
+        HandlesUsedThread += AggregateLogAlloc<<1;
+        AggregateLogAlloc = 0;
+        Allocated += ThreadAllocated;
+        ThreadAllocated = 0;
+        if (Allocated > TriggerPoint || HandlesUsedThread > HandlesPerBlock * 1024) {
+            int temp = Allocated.exchange(0);
+            if (temp > TriggerPoint || HandlesUsedThread > HandlesPerBlock * 1024) {
+                HandlesUsedThread = 0;
+                if (CombinedThread) single_thread_event = true;
+                else SendCollectionEvent();
+            }
+            else Allocated += temp;
+        }
+
+    }
+
+    //Once every 300 allocations within a thread or for every allocation over 500,000 bytes, it checks how much was allocated by all threads and triggers a garbage collect if it was beyond a threshold
+    //Note that alloc merge does this whenever a thread exits as well.
     void log_alloc(size_t a)
     {
         ThreadAllocated += a;
-        if (++AggregateLogAlloc > 300) {
-            HandlesUsedThread += 600;
-            AggregateLogAlloc = 0;
-            Allocated += ThreadAllocated;
-            ThreadAllocated = 0;
-            if (Allocated > TriggerPoint || HandlesUsedThread> HandlesPerThread) {
-                if (Allocated.exchange(0) > TriggerPoint || HandlesUsedThread > HandlesPerThread) {
-                    HandlesUsedThread = 0;
-                    if (CombinedThread) single_thread_event = true;
-                    else SendCollectionEvent();
-                }
-            }
+        if (++AggregateLogAlloc > 300 || a > 500000) {
+            alloc_merge();
         }
     }
     void log_array_alloc(size_t a, size_t n)
@@ -169,7 +230,6 @@ namespace GC {
 
     void merge_collected()
     {
-        MergeAllHandleLists();
         /*
     extern Collectable* ActiveCollectables[MAX_COLLECTED_THREADS*2];
     extern thread_local RootLetterBase* ActiveRoots[MAX_COLLECTED_THREADS*2];
@@ -193,11 +253,11 @@ namespace GC {
     }
 
     void collect_thread();
-    void init_handle_lists();
+    void init_handle_blocks();
 
     void init(bool combine_thread)
     {
-        init_handle_lists();
+        init_handle_blocks();
         State.state.threads_not_mutating = 0;
         State.state.threads_in_sweep = 0;
         State.state.threads_out_of_collection = 0;
@@ -239,10 +299,10 @@ namespace GC {
         return true
     
     */
-
+    void FreeThreadHandlesInGC();
     void _do_collection() 
     {
-        init_before_gc();
+        FreeThreadHandlesInGC();
         int cr = 0, rr = 0;
         //mark
         for (int i = 0; i < MAX_COLLECTED_THREADS; ++i) {
@@ -285,7 +345,10 @@ namespace GC {
 
     void _do_restore_snapshot()
     {
-
+        //weird optimization that is only safe because of weird timing.
+        //this says "that if we got this far running single threaded, then the non-atomic restore snapshot had to be 100% effective
+        //and we don't need another scan to fix it."
+        //If ThreadsInGC didn't only change monotonically (it only counts up, never down) then this wouldn't be safe.
         if (CombinedThread && ThreadsInGC == 1) return;
         for (int i = 0; i < MAX_COLLECTED_THREADS; ++i) {
             if (nullptr == ScanListsByThread[i]) continue;
@@ -584,11 +647,14 @@ namespace GC {
         thread_enter_mutation(true);
     }
 
+    void FreeThreadHandles();
     void exit_thread()
     {
         thread_leave_mutation();
+        alloc_merge();
+        FreeThreadHandles();
         ThreadSlots[MyThreadNumber] = false;
-//        ThreadsInGC--;
+//        ThreadsInGC--; don't count out.  If we ever stop running single threaded, assume we'll never be single threaded again.
     }
 
 
