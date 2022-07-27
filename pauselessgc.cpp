@@ -60,7 +60,7 @@ RootPtr<CollectableString> int_to_string(int a)
 {
     std::stringstream ss;
     ss << a;
-    return cnew(CollectableString(ss.str().c_str()));
+    return new CollectableString(ss.str().c_str());
 }
 
 void mutator_thread()
@@ -74,7 +74,7 @@ void mutator_thread()
 
     //RootPtr<CollectableHashTable<CollectableString,RandomCounted> > hash = cnew2template(CollectableHashTable<CollectableString, RandomCounted>());
 
-    RootPtr<CollectableVector<RandomCounted> > vec= cnew (CollectableVector<RandomCounted>());
+    RootPtr<CollectableVector<RandomCounted> > vec= new CollectableVector<RandomCounted>();
     for (int k = 1; k <= 50; ++k) {
         vec->clear();
         for (int i = 0; i < Testlen; ++i)
@@ -84,7 +84,7 @@ void mutator_thread()
 
             //hash->insert_or_assign(index, cnew(RandomCounted(i)));
             int b = vec->size();
-            bunch[i] = cnew(RandomCounted(i));
+            bunch[i] = new RandomCounted(i);
             //vec->push_front(hash[index]);
             vec->push_back(bunch[i]);
             //vec->insert(vec->end(), hash[index]);
@@ -134,7 +134,7 @@ void mutator_thread()
                 RootPtr<CollectableString> index = int_to_string(Testlen - i - 1);
 
                 //hash->insert_or_assign(index, cnew(RandomCounted(Testlen - i - 1)));
-                bunch[i] = cnew(RandomCounted(Testlen-i-1));
+                bunch[i] = new RandomCounted(Testlen-i-1);
                 //assert(bunch[i].var->owned);
                 //assert(!bunch[i]->deleted);
             }

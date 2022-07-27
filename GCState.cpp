@@ -635,7 +635,7 @@ namespace GC {
             ScanLists* s = new ScanLists;
 
             for (int i = 0; i < 2; ++i) {
-                s->collectables[i] = Handles[cnew (CollectableSentinel())->getHandle()].ptr;
+                s->collectables[i] = Handles[(new CollectableSentinel())->getHandle()].ptr;
                 s->collectables[i]->circular_double_list_is_sentinel = true;
                 s->roots[i] = new RootLetterBase(_SENTINEL_);
             }

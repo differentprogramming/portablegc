@@ -41,7 +41,7 @@ struct CollectableKeyHashTable :public Collectable
 	InstancePtr<CollectableInlineVector<struct CollectableKeyHashTable<K, V>>> data;
 
 
-	CollectableKeyHashTable(int s = INITIAL_HASH_SIZE) :HASH_SIZE(s), used(0), wasted(0), data(cnew2template(CollectableInlineVector<CollectableKeyHashTable<K, V>>(s))) {}
+	CollectableKeyHashTable(int s = INITIAL_HASH_SIZE) :HASH_SIZE(s), used(0), wasted(0), data(new CollectableInlineVector<CollectableKeyHashTable<K, V>>(s)) {}
 
 	void inc_used()
 	{
@@ -51,7 +51,7 @@ struct CollectableKeyHashTable :public Collectable
 			int OLD_HASH_SIZE = HASH_SIZE;
 			HASH_SIZE <<= 1;
 			RootPtr<CollectableInlineVector<CollectableKeyHashTable<K, V> > > t = data;
-			data = cnew2template(CollectableInlineVector<CollectableKeyHashTable<K, V> >(HASH_SIZE));
+			data = new CollectableInlineVector<CollectableKeyHashTable<K, V> >(HASH_SIZE);
 			used = 0;
 			wasted = 0;
 			for (int i = 0; i < OLD_HASH_SIZE; ++i) {
@@ -172,7 +172,7 @@ struct CollectableValueHashTable :public Collectable
 	InstancePtr<CollectableInlineVector<CollectableValueHashEntry<K, V>>> data;
 
 
-	CollectableValueHashTable(int s = INITIAL_HASH_SIZE) :HASH_SIZE(s), used(0), wasted(0), data(cnew2template(CollectableInlineVector<CollectableValueHashEntry<K, V>>(s))) {}
+	CollectableValueHashTable(int s = INITIAL_HASH_SIZE) :HASH_SIZE(s), used(0), wasted(0), data(new CollectableInlineVector<CollectableValueHashEntry<K, V>>(s)) {}
 
 	void inc_used()
 	{
@@ -182,7 +182,7 @@ struct CollectableValueHashTable :public Collectable
 			int OLD_HASH_SIZE = HASH_SIZE;
 			HASH_SIZE <<= 1;
 			RootPtr<CollectableInlineVector<CollectableValueHashEntry<K, V> > > t = data;
-			data = cnew2template(CollectableInlineVector<CollectableValueHashEntry<K, V> >(HASH_SIZE));
+			data = new CollectableInlineVector<CollectableValueHashEntry<K, V> >(HASH_SIZE);
 			used = 0;
 			wasted = 0;
 			for (int i = 0; i < OLD_HASH_SIZE; ++i) {
@@ -305,7 +305,7 @@ struct CollectableHashTable :public Collectable
 	InstancePtr<CollectableInlineVector<CollectableHashEntry<K,V>>> data;
 
 
-	CollectableHashTable(int s= INITIAL_HASH_SIZE) :HASH_SIZE(s), used(0), wasted(0), data(cnew2template(CollectableInlineVector<CollectableHashEntry<K,V>>(s))) {}
+	CollectableHashTable(int s= INITIAL_HASH_SIZE) :HASH_SIZE(s), used(0), wasted(0), data(new CollectableInlineVector<CollectableHashEntry<K,V>>(s)) {}
 
 	void inc_used()
 	{
@@ -315,7 +315,7 @@ struct CollectableHashTable :public Collectable
 			int OLD_HASH_SIZE = HASH_SIZE;
 			HASH_SIZE <<= 1;
 			RootPtr<CollectableInlineVector<CollectableHashEntry<K,V> > > t ( data);
-			data = cnew2template(CollectableInlineVector<CollectableHashEntry<K,V> >(HASH_SIZE));
+			data = new CollectableInlineVector<CollectableHashEntry<K,V> >(HASH_SIZE);
 			used = 0;
 			wasted = 0;
 			for (int i = 0; i < OLD_HASH_SIZE; ++i) {

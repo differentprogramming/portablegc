@@ -79,70 +79,7 @@ namespace GC {
 
     const Handle NULLHandle = 0;//set the first handle to the nullptr
 
-    /*
-    const int TotalHandles = 100000000;
-
-    const int HandlesPerThread = TotalHandles / MAX_COLLECTED_THREADS;
-
-
-
-    extern Handle HandleList[MAX_COLLECTED_THREADS];
-    extern Handle GCHandleListHead[MAX_COLLECTED_THREADS];
-    extern Handle GCHandleListTail[MAX_COLLECTED_THREADS];
-
-    int get_thread_from_handle(int l)
-    {
-        return l / HandlesPerThread;
-    }
-
-    union HandleType
-    {
-        Collectable* ptr;
-        Handle list;
-    };
-
-    extern HandleType Handles[TotalHandles];
-
-    inline void init_before_gc()
-    {
-        for (int i = 0; i < MAX_COLLECTED_THREADS; ++i)
-        {
-            GCHandleListTail[i] = GCHandleListHead[i] = EndOfHandleFreeList;
-        }
-    }
-
-    inline void DeallocHandleInGC(Handle l)
-    {
-        int thread = get_thread_from_handle(l);
-
-        Handles[l].list = GCHandleListHead[thread];
-        if (GCHandleListTail[thread] == EndOfHandleFreeList) GCHandleListTail[thread] = l;
-
-        GCHandleListHead[thread] = l;
-    }
-
-    inline void MergeHandleList(int thread) {
-        if (GCHandleListTail[thread] != EndOfHandleFreeList)
-        {
-            Handles[GCHandleListTail[thread]].list = HandleList[thread];
-            HandleList[thread] = GCHandleListHead[thread];
-        }
-    }
-
-    inline void MergeAllHandleLists()
-    {
-        for (int i = 0; i < MAX_COLLECTED_THREADS; ++i) {
-            MergeHandleList(i);
-        }
-    }
-
-    inline Handle AllocateHandle()
-    {
-        Handle next = HandleList[MyThreadNumber];
-        HandleList[MyThreadNumber] = Handles[next].list;
-        return next;
-    }
-*/ 
+   
     void log_alloc(size_t a);
     void log_array_alloc(size_t a, size_t n);
 
@@ -231,9 +168,7 @@ namespace GC {
 
 
 
-#define cnew(A) ([&]{ auto * _AskdlfA_=new A;  GC::log_alloc(_AskdlfA_->my_size()); GC::Handle _lskdfjKJK_ = GC::AllocateHandle(); if (GC::EndOfHandleFreeList==_lskdfjKJK_) abort(); GC::Handles[_lskdfjKJK_].ptr =  _AskdlfA_; _AskdlfA_->myHandle = _lskdfjKJK_; return _AskdlfA_; })()
-#define cnew2template(A,B) ([&]{ auto * _AskdlfA_=new A,B;  GC::log_alloc(_AskdlfA_->my_size()); GC::Handle _lskdfjKJK_ = GC::AllocateHandle(); if (GC::EndOfHandleFreeList==_lskdfjKJK_) abort(); GC::Handles[_lskdfjKJK_].ptr =  _AskdlfA_; _AskdlfA_->myHandle = _lskdfjKJK_; return _AskdlfA_; })()
-#define cnew3template(A,B,C) ([&]{ auto * _AskdlfA_=new A,B,C;  GC::log_alloc(_AskdlfA_->my_size()); GC::Handle _lskdfjKJK_ = GC::AllocateHandle(); if (GC::EndOfHandleFreeList==_lskdfjKJK_) abort(); GC::Handles[_lskdfjKJK_].ptr =  _AskdlfA_; _AskdlfA_->myHandle = _lskdfjKJK_; return _AskdlfA_; })()
+
 //#define cnew_array(A,N) ([&]{ auto _NfjkasjdflN_ = N; auto _AskdlfA_=new A[_NfjkasjdflN_];  GC::log_array_alloc(_AskdlfA_[0]->my_size(),_NfjkasjdflN_); GC::Handle _lskdfjKJK_ = GC::AllocateHandle(); GC::Handles[_lskdfjKJK_].ptr =  _AskdlfA_; return _lskdfjKJK_; })()
 
     extern std::atomic_uint32_t ThreadsInGC;

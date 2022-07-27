@@ -444,12 +444,12 @@ protected:
     {
         GC::DeallocHandleInGC(myHandle);
     }
-    Collectable(_sentinel_) : CircularDoubleList(_SENTINEL_), collectable_back_ptr(collectable_null) , collectable_marked(false)
+    Collectable(_sentinel_) : CircularDoubleList(_SENTINEL_), collectable_back_ptr(collectable_null) , collectable_marked(false), myHandle(GC::AllocateHandle())
 #ifndef NDEBUG
         ,deleted(0)
 #endif
     {
-        
+        GC::Handles[myHandle].ptr = this;
     }
 
 public:
@@ -539,7 +539,8 @@ public:
     //virtual GC::SnapPtr* index_into_snapshot_ptrs(int num) = 0;
     //not snapshot, includes ones that could be null because they're live
     virtual int total_instance_vars() const = 0;
-    virtual size_t my_size() const = 0;
+    void log_size(size_t s) { GC::log_alloc(s); }
+    //virtual size_t my_size() const = 0;
     virtual InstancePtrBase* index_into_instance_vars(int num) = 0;
     virtual void clean_after_collect() {}
     virtual CollectableEqualityClass equality_class() const { return CollectableEqualityClass::by_address; }
@@ -557,21 +558,22 @@ public:
     }
     Collectable(Collectable&&) = delete;
 
-    Collectable() :CircularDoubleList(_START_, GC::ScanListsByThread[GC::MyThreadNumber]->collectables[GC::ActiveIndex]), collectable_back_ptr(collectable_null), collectable_marked(false)
+    Collectable() :CircularDoubleList(_START_, GC::ScanListsByThread[GC::MyThreadNumber]->collectables[GC::ActiveIndex]), collectable_back_ptr(collectable_null), collectable_marked(false), myHandle(GC::AllocateHandle())
 #ifndef NDEBUG
         ,deleted(false)
 #endif
     {
-        }
+       GC::Handles[myHandle].ptr = this;
+    }
 
 };
 struct CollectableString : public Collectable
 {
     char* str;
-    CollectableString(const char* s) :str(_strdup(s)) {}
+    CollectableString(const char* s) :str(_strdup(s)) { log_size(sizeof(this)+strlen(s)); }
     ~CollectableString() { free (str); }
     virtual int total_instance_vars() const { return 0; }
-    virtual size_t my_size() const { return sizeof(*this); }
+    //virtual size_t my_size() const { return sizeof(*this); }
     virtual InstancePtrBase* index_into_instance_vars(int num) { return nullptr; }
     virtual void clean_after_collect() {}
     virtual CollectableEqualityClass equality_class() const { return CollectableEqualityClass::by_string; }
@@ -600,7 +602,7 @@ struct CollectableBlock : public Collectable
     uint8_t size;
     uint8_t reserved;
 
-    size_t my_size() { return sizeof(this); }
+    //size_t my_size() { return sizeof(this); }
     int total_instance_vars() { return reserved; }
 
 
@@ -623,7 +625,7 @@ struct CollectableBlock : public Collectable
         block[size] = collectable_null;
         return true;
     }
-    CollectableBlock():size(0), reserved(0){}
+    CollectableBlock() :size(0), reserved(0) { log_size(sizeof(this)); }
     InstancePtr<T>& operator [] (int i) {
         return block[i & 31];
     }
@@ -656,15 +658,15 @@ struct Collectable2Block : public Collectable
     int b_size(int i=0) { return ((size+i-1) >> 5)+1; }
    
 
-    size_t my_size() { return sizeof(this); }
+    //size_t my_size() { return sizeof(this); }
     int total_instance_vars() { return b_reserved; }
     InstancePtrBase* index_into_instance_vars(int num) { return &block[num]; }
-    Collectable2Block() :size(0), b_reserved(0) {}
+    Collectable2Block() :size(0), b_reserved(0) { log_size(sizeof(this)); }
     bool push_back(const RootPtr<T>& o) {
         if (size == 32*32) return false;
         ++size;
         if (b_size() > b_size(-1)) {
-            if (block[b_size() - 1].get() == collectable_null) block[b_size() - 1] = cnew (CollectableBlock<T>);
+            if (block[b_size() - 1].get() == collectable_null) block[b_size() - 1] = new CollectableBlock<T>;
             if (b_size() > b_reserved) b_reserved = b_size();
         }
         return block[b_size() - 1]->push_back(o);
@@ -695,7 +697,7 @@ struct Collectable2Block : public Collectable
         int j = 31&(i >> 5);
         for (int k = b_size()-1; k <= j; ++k) {
             if (block[k].get() == collectable_null) {
-                block[k] = cnew( CollectableBlock<T>);
+                block[k] = new CollectableBlock<T>;
                 if (k<j) block[k]->insure((1<<6)-1);
             }
         }
@@ -738,15 +740,15 @@ struct Collectable3Block : public Collectable
 
 
 
-    size_t my_size() { return sizeof(this); }
+    //size_t my_size() { return sizeof(this); }
     int total_instance_vars() { return b_reserved; }
-    Collectable3Block() :size(0), b_reserved(0) {}
+    Collectable3Block() :size(0), b_reserved(0) { log_size(sizeof(this)); }
     InstancePtrBase* index_into_instance_vars(int num) { return &block[num]; }
     bool push_back(const RootPtr<T>& o) {
         if (size == 32 * 32 * 32) return false;
         ++size;
         if (b_size() > b_size(-1)) {
-            if (block[b_size()-1].get() == collectable_null) block[b_size()-1] = cnew (Collectable2Block<T>);
+            if (block[b_size()-1].get() == collectable_null) block[b_size()-1] = new Collectable2Block<T>;
             if (b_size() > b_reserved) b_reserved = b_size();
         }
         return block[b_size() - 1]->push_back(o);
@@ -774,7 +776,7 @@ struct Collectable3Block : public Collectable
         int j = 31 & (i >> 10);
         for (int k = b_size() - 1; k <= j; ++k) {
             if (block[k].get() == collectable_null) {
-                block[k] = cnew (Collectable2Block<T>);
+                block[k] = new Collectable2Block<T>;
                 if (k < j) block[k]->insure((1 << 11) - 1);
             }
         }
@@ -819,15 +821,15 @@ struct Collectable4Block : public Collectable
     int size;
     int b_size(int i = 0) { return ((size + i - 1) >> 15)+1; }
 
-    size_t my_size() { return sizeof(this); }
+    //size_t my_size() { return sizeof(this); }
     int total_instance_vars() { return b_reserved; }
-    Collectable4Block() :size(0), b_reserved(0) {}
+    Collectable4Block() :size(0), b_reserved(0) { log_size(sizeof(this)); }
     InstancePtrBase* index_into_instance_vars(int num) { return &block[num]; }
     bool push_back(const RootPtr<T>& o) {
         if (size == 32 * 32 * 32) return false;
         ++size;
         if (b_size() > b_size(-1)) {
-            if (block[b_size() - 1].get() == collectable_null) block[b_size() - 1] = cnew (Collectable3Block<T>);
+            if (block[b_size() - 1].get() == collectable_null) block[b_size() - 1] = new Collectable3Block<T>;
             if (b_size() > b_reserved) b_reserved = b_size();
         }
         return block[b_size() - 1]->push_back(o);
@@ -857,7 +859,7 @@ struct Collectable4Block : public Collectable
         int j = 31 & (i >> 15);
         for (int k = b_size() - 1; k <= j; ++k) {
             if (block[k].get() == collectable_null) {
-                block[k] = cnew (Collectable3Block<T>);
+                block[k] = new Collectable3Block<T>;
                 if (k < j) block[k]->insure((1 << 16) - 1);
             }
         }
@@ -957,16 +959,16 @@ struct CollectableInlineVector : public Collectable
                 instance_counts[t++] = data[i].index_into_instance_vars(j);
             }
         }
-
+        log_size( sizeof(*this) + size * sizeof(T) + total_vars * sizeof(void*));
     }
     int total_instance_vars() const
     {
         return total_vars;
     }
-    size_t my_size() const 
-    {
-        return sizeof(*this)+size*sizeof(T)+ total_vars*sizeof(void *);
-    }
+//    size_t my_size() const 
+//    {
+//        return sizeof(*this)+size*sizeof(T)+ total_vars*sizeof(void *);
+//    }
     InstancePtrBase* index_into_instance_vars(int num)
     {
         return instance_counts[num];
@@ -1027,7 +1029,7 @@ struct CollectableVectoreUse : public Collectable
 
     std::unique_ptr<InstancePtr<T> > data;
 
-    CollectableVectoreUse(int s) :size(0), scan_size(0),reserved(s), data( new InstancePtr<T>[s]) {}
+    CollectableVectoreUse(int s) :size(0), scan_size(0), reserved(s), data(new InstancePtr<T>[s]) { log_size(sizeof(*this) + sizeof(InstancePtr<T>) * reserved); }
     int total_instance_vars() const {
         MEM_TEST();
         return scan_size;
@@ -1036,7 +1038,7 @@ struct CollectableVectoreUse : public Collectable
         MEM_TEST();
         return data.get() + num;
     }
-    size_t my_size() const { return sizeof(*this) + sizeof(InstancePtr<T>) * reserved; }
+    //size_t my_size() const { return sizeof(*this) + sizeof(InstancePtr<T>) * reserved; }
 
 
     bool push_back(const RootPtr<T>& o) {
@@ -1143,7 +1145,7 @@ class CollectableVector : public Collectable
         MEM_TEST();
         return &data;
     }
-    size_t my_size() const { return sizeof(*this); }
+    //size_t my_size() const { return sizeof(*this); }
 
     struct iterator;
     struct const_iterator {
@@ -1346,10 +1348,12 @@ class CollectableVector : public Collectable
         for (int i = 0; i < s; ++i) push_back(o->at(i));
     }
 
-    CollectableVector() : data(cnew (CollectableVectoreUse<T>(8))){}
-    CollectableVector(int s) : data(cnew (CollectableVectoreUse<T>(s<<1))){}
-    CollectableVector(int s, const RootPtr<T>& exemplar) : data(cnew( CollectableVectoreUse<T>(s << 1))){ resize(s, exemplar); }
-    CollectableVector(int s, InstancePtr<T>& exemplar) : data(cnew (CollectableVectoreUse<T>(s << 1))) { resize(s, exemplar); }
+    CollectableVector() : data(new CollectableVectoreUse<T>(8)) { log_size(sizeof(*this)); }
+    CollectableVector(int s) : data(new  CollectableVectoreUse<T>(s<<1)){ log_size(sizeof(*this)); }
+    CollectableVector(int s, const RootPtr<T>& exemplar) : data(new  CollectableVectoreUse<T>(s << 1)){ resize(s, exemplar); log_size(sizeof(*this));
+    }
+    CollectableVector(int s, InstancePtr<T>& exemplar) : data(new  CollectableVectoreUse<T>(s << 1)) { resize(s, exemplar); log_size(sizeof(*this));
+    }
     void push_back(const RootPtr<T>& o)
     {
         MEM_TEST();
@@ -1498,7 +1502,7 @@ class CollectableVector : public Collectable
         MEM_TEST();
         if (!data->resize(s, exemplar)) {
             RootPtr<CollectableVectoreUse<T> > data_held_for_collect = data;
-            data = cnew (CollectableVectoreUse<T>(this, s << 1));
+            data = new CollectableVectoreUse<T>(this, s << 1);
             InstancePtr<T>* source = data_held_for_collect.data.get();
             InstancePtr<T>* dest = data.data.get();
 
@@ -1521,7 +1525,7 @@ class CollectableVector : public Collectable
         MEM_TEST();
         if (!data->resize(s,exemplar)) {
             RootPtr<CollectableVectoreUse<T> > data_held_for_collect = data;
-            data = cnew( CollectableVectoreUse<T>(this, s << 1));
+            data = new CollectableVectoreUse<T>(this, s << 1);
             InstancePtr<T>* source = data_held_for_collect.data.get();
             InstancePtr<T>* dest = data.data.get();
 
@@ -1552,7 +1556,7 @@ class CollectableVector : public Collectable
         MEM_TEST();
         if (data->reserved < s) {
             RootPtr<CollectableVectoreUse<T> > data_held_for_collect ( data);
-            data = cnew(CollectableVectoreUse<T>( s << 1));
+            data = new CollectableVectoreUse<T>( s << 1);
             InstancePtr<T> * source = data_held_for_collect->data.get();
             InstancePtr<T> * dest = data->data.get();
 
@@ -1571,7 +1575,7 @@ class CollectableVector : public Collectable
  //       reserve(s);
         if (!data->push_front(o)) {
             RootPtr<CollectableVectoreUse<T> > data_held_for_collect ( data);
-            data = cnew( CollectableVectoreUse<T>(s << 1));
+            data = new  CollectableVectoreUse<T>(s << 1);
             InstancePtr<T>* source = data_held_for_collect->data.get();
             InstancePtr<T>* dest = data->data.get();
 
@@ -1620,10 +1624,10 @@ public:
     InstancePtrBase* index_into_instance_vars(int num) {
         return &blocks;
     }
-    size_t my_size() const { return sizeof(*this); }
+    //size_t my_size() const { return sizeof(*this); }
 
 
-    SharableVector() :blocks(cnew( Collectable4Block<T>)) {}
+    SharableVector() :blocks(new Collectable4Block<T>) { log_size(sizeof(*this)); }
     bool push_back(const RootPtr<T>& o) 
     {
         return blocks->push_back(o);
@@ -1676,6 +1680,6 @@ public:
     }
     virtual int total_instance_vars() const { return 0; }
     //not snapshot, includes ones that could be null because they're live
-    virtual size_t my_size() const { return 0; }
+    //virtual size_t my_size() const { return 0; }
     virtual InstancePtrBase* index_into_instance_vars(int num) { return nullptr; }
 };
