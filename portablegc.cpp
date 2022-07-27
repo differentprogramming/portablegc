@@ -12,8 +12,14 @@ namespace GC {
 
     //How handles are allocated...
     //A lock free LIFO is filled with blocks of 16k free handles
-    //whenever an object is created, 
-
+    //whenever an object is created, each thread pulls from its list of up to 16 handles.
+    //When it's out of handles it pulls another block from the LIFO 
+    //
+    //The gc thread collects handles into 16k blocks and dumps those into the LIFO
+    //
+    //When a thread exits, it packages up its remaining handles and dumps those into a different LIFO for the gc to recover
+    //
+    //This way the whole thing works without there being any mutexes
   
     LockFreeLIFO<Handle, HandleBlocks + MAX_COLLECTED_THREADS+1> HandleBlockQueue;
     LockFreeLIFO<Handle, MAX_COLLECTED_THREADS * 10000> ReleaseHandlesQueue;
