@@ -142,7 +142,7 @@
     <ClCompile Include="Collectable.cpp" />
     <ClCompile Include="CollectableHash.cpp" />
     <ClCompile Include="GCState.cpp" />
-    <ClCompile Include="LockFreeFIFO.cpp" />
+    <ClCompile Include="LockFreeLIFO.cpp" />
     <ClCompile Include="pauselessgc.cpp" />
     <ClCompile Include="portablegc.cpp" />
     <ClCompile Include="spooky.cpp" />
@@ -151,7 +151,7 @@
     <ClInclude Include="Collectable.h" />
     <ClInclude Include="CollectableHash.h" />
     <ClInclude Include="GCState.h" />
-    <ClInclude Include="LockFreeFIFO.h" />
+    <ClInclude Include="LockFreeLIFO.h" />
     <ClInclude Include="spooky.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

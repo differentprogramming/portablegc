@@ -27,13 +27,13 @@
     <ClCompile Include="GCState.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="LockFreeFIFO.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="pauselessgc.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="spooky.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="LockFreeLIFO.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -47,10 +47,10 @@
     <ClInclude Include="CollectableHash.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="LockFreeFIFO.h">
+    <ClInclude Include="spooky.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="spooky.h">
+    <ClInclude Include="LockFreeLIFO.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
