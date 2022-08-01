@@ -155,7 +155,10 @@ namespace GC {
     thread_local PhaseEnum ThreadState;
     thread_local int NotMutatingCount;
     thread_local int MyThreadNumber;
-    thread_local bool CombinedThread=false;
+    //there is a bug in the handling of CombinedThread.  Some places assuming it's visible across threads some assuming it isn't
+    // for now it only works in a single threaded program
+    //thread_local 
+        bool CombinedThread=false;
     
     std::thread CollectionThread;
 

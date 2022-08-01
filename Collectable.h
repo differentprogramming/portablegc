@@ -108,7 +108,7 @@ template <typename T>
 class InstancePtr : public InstancePtrBase
 {
 //    void double_ptr_store( T* const v) { GC::double_ptr_store(&value, v == nullptr ? GC::NULLHandle : v->getHandle()); }
-    void double_ptr_store(T* const v) { GC::double_ptr_store(&value, v->getHandle()); }
+    void double_ptr_store(const T* v) { GC::double_ptr_store(&value, v->getHandle()); }
 public:
 
     GC::Handle getHandle() const { return GC::load(&value); }
@@ -125,25 +125,23 @@ public:
  //   InstancePtr(GC::Handle const v) { double_ptr_store( v); }
 
     
-    explicit InstancePtr( T*  v) { double_ptr_store( v); }
+    explicit InstancePtr(const T*  v) { double_ptr_store( v); }
 
-
-    template<typename Y>
-    explicit InstancePtr(const InstancePtr<Y>& o) {
+    explicit InstancePtr(const InstancePtr<T>& o) {
         double_ptr_store(o.get());
     }
-    template<typename Y>
-    void operator = (Y *const o) {
+
+    void operator = (T *const o) {
         store(o);
     }
-    template<typename Y>
-    void operator = (const InstancePtr<Y>& o) {
+
+    void operator = (const InstancePtr<T>& o) {
         store(o.get());
     }
-    template<typename Y>
-    explicit InstancePtr(const RootPtr<Y>& o);
-    template<typename Y>
-    void operator = (const RootPtr<Y>& o);
+
+    explicit InstancePtr(const RootPtr<T>& o);
+
+    void operator = (const RootPtr<T>& o);
 };
 
 template< class T, class U >
@@ -248,35 +246,31 @@ struct RootLetter : public RootLetterBase
     RootLetter(RootLetter&&) = delete;
 
     RootLetter() {}
-    RootLetter(T* v) :value(v){}
+    RootLetter(const T* v) :value(v){}
 };
 
 template <typename T>
 struct RootPtr
 {
     RootLetter<T>* var;
-
+    RootPtr<T>(RootPtr<T> &&) = default;
     void operator = ( T* const o)
     {
         var->value.store(o);
     }
 
-    template <typename Y>
-    void operator = (const RootPtr<Y>& v)
+    void operator = (const RootPtr<T>& v)
     {
         var->value.store(v.var->value.get());
     }
 
-    template <typename Y>
-    void operator = (const InstancePtr<Y>& v)
+
+    void operator = (const InstancePtr<T>& v)
     {
         var->value.store(v.get());
     }
-    template <typename Y>
-    void operator = (Y* v)
-    {
-        var->value.store(v);
-    }   
+
+
     //template <typename Y>
   //  void operator = (Y* const v)
   //  {
@@ -301,8 +295,13 @@ struct RootPtr
     {
         return var->value.get();
     }
-    template <typename Y>
-    RootPtr(Y* const v) :var(new RootLetter<T>(v)) 
+ //   template <typename Y>
+ //   RootPtr(Y* v) :var(new RootLetter<T>(v)) 
+ //   {
+ //       GC::log_alloc(sizeof(*var));
+ //   }
+
+    RootPtr(const T* v) : var(new RootLetter<T>(v))
     {
         GC::log_alloc(sizeof(*var));
     }
@@ -349,6 +348,18 @@ struct RootPtr
     }
 };
 
+template<typename T>
+InstancePtr<T>::InstancePtr(const RootPtr<T>& o)
+{
+    double_ptr_store(o.get());
+}
+
+template<typename T>
+void InstancePtr<T>::operator = (const RootPtr<T>& o)
+{
+    store(o.get());
+}
+
 template< class T, class U >
 RootPtr<T> static_pointer_cast(const RootPtr<U>& v) noexcept
 {
@@ -385,23 +396,7 @@ RootPtr<T> const_reinterpret_cast(const RootPtr<U>& v) noexcept
     return RootPtr<T>(reinterpret_cast<T*>(v.var->value.get()));
 }
 
-template<typename T>
-template<typename Y>
-InstancePtr<T>::InstancePtr(const RootPtr<Y>& v) {
-#ifndef NDEBUG
-    v->memtest();
-#endif
-    double_ptr_store(v.var->value.get());
-}
 
-template<typename T>
-template<typename Y>
-void InstancePtr<T>::operator = (const RootPtr<Y>& v) {
-#ifndef NDEBUG
-    v->memtest();
-#endif
-    store(v.var->value.get());
-}
 
 namespace GC {
     void merge_collected();
@@ -589,6 +584,14 @@ struct CollectableString : public Collectable
         return spooky_hash64((void*)str,strlen(str), 0xc243487c4b5ee78e);
     }
 
+};
+template<>
+struct std::hash<CollectableString>
+{
+    std::size_t operator()(CollectableString const& s) const noexcept
+    {
+        return (size_t)s.hash();
+    }
 };
 
 inline std::ostream& operator<<(std::ostream& os, const RootPtr<CollectableString>& o) {
@@ -947,7 +950,7 @@ struct CollectableInlineVector : public Collectable
 
     CollectableInlineVector(int s) : instance_counts(nullptr),size(s){
         data = new T [s];
-        
+        assert(data != nullptr);
         total_vars = 0;
         for (int i = 0; i < s; ++i) {
             total_vars += data[i].total_instance_vars();
@@ -1264,44 +1267,44 @@ class CollectableVector : public Collectable
         RootPtr<T> operator++(int) { int p = pos;  ++pos; return v[p]; }
         RootPtr<T> operator--(int) { int p = pos;  --pos; return v[p]; }
 
-        InstancePtr<T>& operator*() { return v[pos]; }
+        InstancePtr<T>& operator*() { return v->operator[](pos); }
         InstancePtr<T>* operator->() { return &v[pos]; }
 
         bool operator == (CollectableVector<T>::iterator i) {
-            return pos == i.pos && v.data.get() == i.pos.data.get();
+            return pos == i.pos && v->data.get() == i.v->data.get();
         }
         bool operator < (CollectableVector<T>::iterator i) {
-            return pos < i.pos && v.data.get() == i.pos.data.get();
+            return pos < i.pos && v->data.get() == i.v->data.get();
         }
         bool operator > (CollectableVector<T>::iterator i) {
-            return pos > i.pos && v.data.get() == i.pos.data.get();
+            return pos > i.pos && v->data.get() == i.v->data.get();
         }
         bool operator >= (CollectableVector<T>::iterator i) {
-            return pos >= i.pos && v.data.get() == i.pos.data.get();
+            return pos >= i.pos && v->data.get() == i.v->data.get();
         }
         bool operator <= (CollectableVector<T>::iterator i) {
-            return pos <= i.pos && v.data.get() == i.pos.data.get();
+            return pos <= i.pos && v->data.get() == i.v->data.get();
         }
         bool operator != (CollectableVector<T>::iterator i) {
-            return pos != i.pos && v.data.get() == i.pos.data.get();
+            return pos != i.pos && v->data.get() == i.v->data.get();
         }
         bool operator == (CollectableVector<T>::const_iterator i) {
-            return pos == i.pos && v.data.get() == i.pos.data.get();
+            return pos == i.pos && v->data.get() == i.v->data.get();
         }
         bool operator < (CollectableVector<T>::const_iterator i) {
-            return pos < i.pos&& v.data.get() == i.pos.data.get();
+            return pos < i.pos&& v->data.get() == i.v->data.get();
         }
         bool operator > (CollectableVector<T>::const_iterator i) {
-            return pos > i.pos && v.data.get() == i.pos.data.get();
+            return pos > i.pos && v->data.get() == i.v->data.get();
         }
         bool operator >= (CollectableVector<T>::const_iterator i) {
-            return pos >= i.pos && v.data.get() == i.pos.data.get();
+            return pos >= i.pos && v->data.get() == i.v->data.get();
         }
         bool operator <= (CollectableVector<T>::const_iterator i) {
-            return pos <= i.pos && v.data.get() == i.pos.data.get();
+            return pos <= i.pos && v->data.get() == i.v->data.get();
         }
         bool operator != (CollectableVector<T>::const_iterator i) {
-            return pos != i.pos && v.data.get() == i.pos.data.get();
+            return pos != i.pos && v->data.get() == i.v->data.get();
         }
     };
     iterator begin() {

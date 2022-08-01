@@ -1,9 +1,22 @@
 #ifndef GRAPHEME_STRING_H
 #define GRAPHEME_STRING_H
 
+#ifndef VC_EXTRALEAN
+#define VC_EXTRALEAN            // Exclude rarely-used stuff from Windows headers
+#endif
+#include <windows.h>
+#include <vector>
+#include "CollectableHash.h"
+
+//#include <boost/intrusive_ptr.hpp>
+//#include <boost/smart_ptr/intrusive_ref_counter.hpp>
+
+#include <iostream>
+
+#define UTF8PROC_STATIC
+//note it's getting stddef and others from utf8proc.h
 #include "utf8proc/utf8proc.h"
 #include "spooky.h"
-#include "CollectableHash.h"
 
 #define GSTEMPLEN 200
 extern char GSTemp1[GSTEMPLEN];
@@ -40,20 +53,18 @@ public:
 	std::vector<int32_t> codepoint_buffer;
 	std::vector<int> codepoint_to_utf8_index;
 	std::vector<int> grapheme_to_codepoint_index;
-	virtual int total_instance_vars() const { return 0; }
-	virtual size_t my_size() const { return sizeof(*this) + 4*(codepoint_buffer.size()+ codepoint_to_utf8_index.size()+ grapheme_to_codepoint_index.size())+ codepoint_to_utf8_index.back();  }
-	virtual InstancePtrBase* index_into_instance_vars(int num) { return nullptr; }
-static GraphemeString_letter Null;
 
-	void load(const RootPtr<GraphemeString>&);
-	void load(const RootPtr<GraphemeString>&, const RootPtr<GraphemeString>&);
+//static GraphemeString_letter Null;
+
+	void load(const GraphemeString&);
+	void load(const GraphemeString&, const GraphemeString&);
 	void load(const uint8_t* source);
-	void build(const RootPtr<CollectableVector<GraphemeString>>& o);
+	void build(const std::vector<GraphemeString>& o);
 
-	GraphemeString_letter(const RootPtr<CollectableVector<GraphemeString>>& o) { build(o); };
+	GraphemeString_letter(const std::vector<GraphemeString>& o) { build(o); };
 
 	GraphemeString_letter(const uint8_t* source) { load(source); };
-	GraphemeString_letter(const uint8_t* source, SingletonEnum) { auto t = new RootLetter<GraphemeString_letter>(this); t->owned = true;  load(source); };
+	//GraphemeString_letter(const uint8_t* source, SingletonEnum) { intrusive_ptr_add_ref(this); load(source); };
 	GraphemeString_letter(const int32_t* source)
 	{
 		int len = fill_utf8_from_codepoints(source);
@@ -72,66 +83,21 @@ static GraphemeString_letter Null;
 
 	};
 
-	GraphemeString_letter(const RootPtr<GraphemeString>& source) { load(source); };
-	GraphemeString_letter(const RootPtr<GraphemeString>& src1, const RootPtr<GraphemeString>& src2) { load(src1, src2); };
+	InstancePtrBase* index_into_instance_vars(int num) { return nullptr; }
+	int total_instance_vars() const { return 0; }
+
+
+	GraphemeString_letter(const GraphemeString& source) { load(source); };
+	GraphemeString_letter(const GraphemeString& src1, const GraphemeString& src2) { load(src1, src2); };
 };
+
 
 class GraphemeIterator;
 class RGraphemeIterator;
 class GraphemeStringBuilder;
-class GraphemeString;
 LPSTR UnicodeToUTF8(LPCTSTR s);
-
-bool operator==(const RootPtr<GraphemeString>& t,const RootPtr<GraphemeString>& o)
-{
-	//if (size() ==0 && o.size()==0) return true;
-	if (t->hash_value1 != o->hash_value1 || t->hash_value2 != o->hash_value2) return false;
-
-	//the probability of the rest of this being anything more than a waste of time is 1:10^38 small.
-	if (t->size() != o->size()) return false;
-	for (int i = t->codepoint_start_slice_index(), j = o->codepoint_start_slice_index(); i < t->codepoint_end_slice_index(); ++i, ++j) {
-		int32_t a = t->source->codepoint_buffer[i];
-		int32_t b = o->source->codepoint_buffer[j];
-		if (a != b) {
-			return false;
-		}
-		//			if (source->codepoint_buffer[i] != o.source->codepoint_buffer[j]) return false;
-	}
-	return true;
-}
-bool operator<(const RootPtr<GraphemeString>& t,const RootPtr <GraphemeString>& o) 
-{
-	int min_size = t->size() < o->size() ? t->size() : o->size();
-	if (min_size == 0) {
-		if (o->size() > 0) return true;
-		return false;
-	}
-	for (int i = 0; i < min_size - 1; ++i) {
-		int32_t left = t->source->codepoint_buffer[i + t->codepoint_start_slice_index()];
-		int32_t right = o->source->codepoint_buffer[i + o->codepoint_start_slice_index()];
-		if (left != right) {
-			return left < right;
-		}
-	}
-	return t->size() < o->size();
-}
-
-bool operator!=(const RootPtr<GraphemeString>& t,const RootPtr<GraphemeString>& o)
-{ return !(t == o); }
-bool operator>=(const RootPtr<GraphemeString>& t, const RootPtr<GraphemeString>& o)
-{ return !(t < o); }
-bool operator<=(const RootPtr<GraphemeString>& t, const RootPtr<GraphemeString>& o)
-{ return !(o < t); }
-bool operator>(const RootPtr<GraphemeString>& t, const RootPtr<GraphemeString>& o)
-{ return o < t; }
-
-class GraphemeString  : public Collectable
-{
-	friend bool operator==(const RootPtr<GraphemeString>& t, const RootPtr<GraphemeString>& o);
-	friend bool operator<(const RootPtr<GraphemeString>& t, const RootPtr <GraphemeString>& o);
-
-	InstancePtr<GraphemeString_letter> source;
-
+class GraphemeString {
+	RootPtr< const GraphemeString_letter> source;
 	int g_start;
 	int g_end;
 	friend class GraphemeIterator;
@@ -142,12 +108,11 @@ class GraphemeString  : public Collectable
 	void fill_hash() {
 		hash_value1 = 0x1E09C1AE8B8BD53EL;
 		hash_value2 = 0x98DDC5A77F2B363AL;
-		spooky_hash128(&*source->utf8_buffer + byte_start_slice_index(), byte_length(), &hash_value1,&hash_value2);
+		spooky_hash128(&*source->utf8_buffer + byte_start_slice_index(), byte_length(), &hash_value1, &hash_value2);
 	}
-	GraphemeString(const RootPtr<GraphemeString_letter> &s, int st, int ed) :source(s), g_start(st), g_end(ed) {
+	GraphemeString(const RootPtr<const GraphemeString_letter> &s, int st, int ed) :source(s), g_start(st), g_end(ed) { 
 		fill_hash(); 
 	}
-
 
 
 	int grapheme_start_slice_index() const { return g_start; }
@@ -160,23 +125,17 @@ class GraphemeString  : public Collectable
 	int byte_end_slice_index() const { return source->codepoint_to_utf8_index[source->grapheme_to_codepoint_index[g_end-1]]; }
 
 public:
-	~GraphemeString() {}
-	virtual int total_instance_vars() const { return 1; }
-	virtual size_t my_size() const { return sizeof(*this); }
-	virtual InstancePtrBase* index_into_instance_vars(int num) { return &source; }
 
 	uint64_t hash1() const { return hash_value1; }
 	uint64_t hash2() const { return hash_value2; }
 
 	void fill_utf8(uint8_t* dest, bool null_terminate = true) const {
-		GC::safe_point();
 		memcpy(dest, &*source->utf8_buffer + byte_start_slice_index(), byte_length());
 		if (null_terminate)dest[byte_length()] = 0;
 	}
 	void fill_utf8n(uint8_t* dest, int maxlen , bool null_terminate = true) const {
 		int m = byte_length();
 		if (m >= maxlen) m = maxlen-1;
-		GC::safe_point();
 		memcpy(dest, &*source->utf8_buffer + byte_start_slice_index(), maxlen);
 		if (null_terminate)dest[m] = 0;
 	}
@@ -189,12 +148,10 @@ public:
 	}
 
 	void fill_codepoints(int32_t* dest, bool null_terminate = true) const {
-		GC::safe_point();
 		memcpy(dest, &source->codepoint_buffer[0] + codepoint_start_slice_index(), codepoint_length() * sizeof(int32_t));
 		if (null_terminate)dest[codepoint_length()] = 0;
 	}
 	int wchar_t_length() const {
-		GC::safe_point();
 		return MultiByteToWideChar(
 			CP_UTF8,
 			0,
@@ -206,7 +163,6 @@ public:
 	}
 	void fill_wchar_t(wchar_t* dest, bool null_terminate = true) const {
 		int len = wchar_t_length();
-		GC::safe_point();
 		MultiByteToWideChar(
 			CP_UTF8,
 			0,
@@ -225,9 +181,9 @@ public:
 	int codepoint_length() const { return g_start == g_end ? 0 :(codepoint_end_slice_index() - codepoint_start_slice_index()); }
 	int byte_length() const { return g_start == g_end ? 0 : (byte_end_slice_index() - byte_start_slice_index()); }
 
-	GraphemeString operator +(const RootPtr<GraphemeString>& o) const
+	GraphemeString operator +(const GraphemeString& o) const
 	{
-		return GraphemeString(RootPtr<GraphemeString>(new GraphemeString_letter(RootPtr<GraphemeString>(this), o)), 0, size() + o->size() - 1); // {} {}{}?
+		return GraphemeString(RootPtr<const GraphemeString_letter>(new GraphemeString_letter(*this, o)), 0, size() + o.size() - 1); // {} {}{}?
 	}
 
 	static uint8_t nullbyte;
@@ -242,6 +198,7 @@ public:
 		if (i >= codepoint_length() || i < 0) return nullcodepoint;
 		return source->codepoint_buffer[i + codepoint_start_slice_index()];
 	}
+
 	const int32_t& grapheme_num_codepoints(int i) const
 	{
 		if (i >= grapheme_length() || i < 0) return 0;
@@ -277,17 +234,17 @@ public:
 	GraphemeString operator[](int i) const
 	{
 		if (i < 0 || i >= grapheme_length()-1) {
-			return GraphemeString(&GraphemeString_letter::Null, 0, 1);
+			return GraphemeString(new GraphemeString_letter(""), 0, 1);
 		}
 		return GraphemeString(source, i + g_start, i + g_start + 2);
 	}
 
 	GraphemeString deep_copy()
 	{
-		return GraphemeString(new GraphemeString_letter(RootPtr<GraphemeString>(this)), 0, size());
+		return GraphemeString(new GraphemeString_letter(*this), 0, size());
 	}
 
-	GraphemeString(const RootPtr<CollectableVector <GraphemeString>> &o) {
+	GraphemeString(const std::vector <GraphemeString> &o) {
 		source = new GraphemeString_letter(o);
 		g_start = 0; g_end = source->grapheme_to_codepoint_index.size() - 1;
 		fill_hash();
@@ -297,13 +254,13 @@ public:
 	{
 		fill_hash();
 	}
-	GraphemeString(const char* s,SingletonEnum) :source(new GraphemeString_letter((const uint8_t*)s,Singleton)), g_start(0), g_end(source->grapheme_to_codepoint_index.size() - 1)
-	{
-		fill_hash();
-	}
+//	GraphemeString(const char* s,SingletonEnum) :source(new GraphemeString_letter((const uint8_t*)s,Singleton)), g_start(0), g_end(source->grapheme_to_codepoint_index.size() - 1)
+//	{
+//		fill_hash();
+//	}
 
-	GraphemeString(const RootPtr<GraphemeString>& o) :source(o->source), g_start(o->g_start), g_end(o->g_end) { fill_hash(); }
-	GraphemeString(GraphemeString&& o) :source(o.source), g_start(o.g_start), g_end(o.g_end) { fill_hash(); }
+	GraphemeString(const GraphemeString& o) :source(o.source), g_start(o.g_start), g_end(o.g_end), hash_value1(o.hash_value1), hash_value2(o.hash_value2) {  }
+	GraphemeString(GraphemeString&& o) = default;
 	//for windows!
 	GraphemeString(const wchar_t* s) {
 		std::unique_ptr<const uint8_t> ts((const uint8_t*)UnicodeToUTF8(s));
@@ -327,24 +284,24 @@ public:
 	RGraphemeIterator rbegin() const;
 	RGraphemeIterator rend() const;
 
-	bool hash_lt(const RootPtr<GraphemeString>& b) const {
-		return  hash1() < b->hash1() || (hash1() == b->hash1() && (hash2() < b->hash2()));
+	bool hash_lt(const GraphemeString& b) const {
+		return  hash1() < b.hash1() || (hash1() == b.hash1() && (hash2() < b.hash2()));
 	}
 
-	bool hash_order_lt(const RootPtr<GraphemeString>& b) const {
-		return  hash1() < b->hash1() || (hash1() == b->hash1() && (hash2() < b->hash2() || (hash2() == b->hash2() && RootPtr<GraphemeString>(this) < b)));
+	bool hash_order_lt(const GraphemeString& b) const {
+		return  hash1() < b.hash1() || (hash1() == b.hash1() && (hash2() < b.hash2() || (hash2() == b.hash2() && *this < b)));
 	}
 
-	bool hash_eq(const RootPtr<GraphemeString>& o) const
+	bool hash_eq(const GraphemeString& o) const
 	{
-		return hash_value1 == o->hash_value1 && hash_value2 == o->hash_value2;
+		return hash_value1 == o.hash_value1 && hash_value2 == o.hash_value2;
 	}
 	//for std::unordered_map
 	//declare std::unordered_map<GraphemeString, sometype, GraphemeString::HashFunction> umap;
 	//due to the std namespace hash declaration below the class, this should be unnecessary
 	//std::unordered_map<GraphemeString, sometype> umap; should work
 	struct HashFunction {
-		std::size_t operator()(const RootPtr<GraphemeString>& o) const { return (std::size_t)o->hash1(); }
+		std::size_t operator()(const GraphemeString& o) const { return (std::size_t)o.hash1(); }
 	};
 
 	//for map constructor
@@ -354,54 +311,90 @@ public:
 	//declare std::map<GraphemeString, sometype, GraphemeString::cmp> umap;
 	//declare std::map<GraphemeString, sometype> umap; is equivalent
 	struct cmpByHashOrder {
-		bool operator()(const RootPtr<GraphemeString>& a, const RootPtr<GraphemeString>& b) const {
-			return  a->hash_order_lt(b);
+		bool operator()(const GraphemeString& a, const GraphemeString& b) const {
+			return  a.hash_order_lt(b);
 		}
 	};
 
 	struct cmpByHashOnly {
-		bool operator()(const RootPtr<GraphemeString>& a, const RootPtr<GraphemeString>& b) const {
-			return  a->hash_lt(b);
+		bool operator()(const GraphemeString& a, const GraphemeString& b) const {
+			return  a.hash_lt(b);
 		}
 	};
 
 	struct cmp {
-		bool operator()(const RootPtr<GraphemeString>& a, const RootPtr<GraphemeString>& b) const {
-			return  a < b;
+		bool operator()(const GraphemeString& a, const GraphemeString& b) const {
+			return  a<b;
 		}
 	};
 
 
+	bool operator==(const GraphemeString& o) const
+	{
+		//if (size() ==0 && o.size()==0) return true;
+		if (hash_value1 != o.hash_value1 || hash_value2 != o.hash_value2) return false;
 
+		//the probability of the rest of this being anything more than a waste of time is 1:10^38 small.
+		if (size() != o.size()) return false;
+		for (int i = codepoint_start_slice_index(), j = o.codepoint_start_slice_index(); i < codepoint_end_slice_index(); ++i, ++j) {
+			int32_t a = source->codepoint_buffer[i];
+			int32_t b = o.source->codepoint_buffer[j];
+			if (a != b) {
+				return false;
+			}
+//			if (source->codepoint_buffer[i] != o.source->codepoint_buffer[j]) return false;
+		}
+		return true;
+	}
+	bool operator<(const GraphemeString& o) const
+	{
+		int min_size = size() < o.size() ? size() : o.size();
+		if (min_size == 0) {
+			if (o.size() > 0) return true;
+			return false;
+		}
+		for (int i = 0; i < min_size-1; ++i) {
+			int32_t left = source->codepoint_buffer[i + codepoint_start_slice_index()];
+			int32_t right = o.source->codepoint_buffer[i + o.codepoint_start_slice_index()];
+			if (left != right) {
+				return left < right;
+			}
+		}
+		return size() < o.size();
+	}
+
+	bool operator!=(const GraphemeString& o) const { return !(*this == o); }
+	bool operator>=(const GraphemeString& o) const { return !(*this < o); }
+	bool operator<=(const GraphemeString& o) const { return !(o < *this); }
+	bool operator>(const GraphemeString& o) const { return o < *this; }
 
 };
 
-//for std::unordered_map ??and others?
-namespace std
+template<>
+struct std::hash<GraphemeString>
 {
-	template <>
-	struct hash<GraphemeString>
+	std::size_t operator()(GraphemeString const& s) const noexcept
 	{
-		size_t operator()(const RootPtr<GraphemeString>& k) const
-		{
-			return (size_t)k->hash1();
-		}
-	};
-}
+		return (size_t)s.hash1();
+	}
+};
 
-inline std::ostream& operator<<(std::ostream& os, const RootPtr<GraphemeString>& o) {
-	std::unique_ptr<uint8_t[]> buf(new uint8_t[o->byte_length() + 1]);
-	o->fill_utf8(&buf[0]);
+//for std::unordered_map ??and others?
+
+
+inline std::ostream& operator<<(std::ostream& os, const GraphemeString& o) {
+	std::unique_ptr<uint8_t[]> buf(new uint8_t[o.byte_length() + 1]);
+	o.fill_utf8(&buf[0]);
 
 	return os << &buf[0];
 }
 
-class GraphemeStringBuilder  {
-	RootPtr<CollectableVector<GraphemeString>> list;
+class GraphemeStringBuilder {
+	std::vector<GraphemeString> list;
 public:
-	GraphemeStringBuilder& operator<<(const RootPtr<GraphemeString> &o)
+	GraphemeStringBuilder& operator<<(const GraphemeString &o)
 	{
-		list->push_back(o);
+		list.push_back(o);
 		return *this;
 	}
 	operator GraphemeString() const {
@@ -412,11 +405,11 @@ public:
 	}
 };
 
-class GraphemeIterator  {
-	RootPtr<GraphemeString> s;
+class GraphemeIterator {
+	GraphemeString s;
 	int pos;
 	friend class GraphemeString;
-	GraphemeIterator(const RootPtr<GraphemeString>& s, int p = 0) :s(s), pos(p) {}
+	GraphemeIterator(const GraphemeString& s, int p = 0) :s(s), pos(p) {}
 public:
 	GraphemeString operator *() const {
 		return s[pos];
@@ -455,13 +448,13 @@ public:
 		return pos != o.pos;
 	}
 };
-inline GraphemeIterator GraphemeString::begin() const { return GraphemeIterator(RootPtr<GraphemeString>(this), 0); }
-inline GraphemeIterator GraphemeString::end() const { return GraphemeIterator(RootPtr<GraphemeString>(this), size()-1); }
+inline GraphemeIterator GraphemeString::begin() const { return GraphemeIterator(*this, 0); }
+inline GraphemeIterator GraphemeString::end() const { return GraphemeIterator(*this, size()-1); }
 class RGraphemeIterator {
-	RootPtr<GraphemeString> s;
+	GraphemeString s;
 	int pos;
 	friend class GraphemeString;
-	RGraphemeIterator(const RootPtr<GraphemeString>& s, int p = 0) :s(s), pos(s->size() - 1 - p) {}
+	RGraphemeIterator(const GraphemeString& s, int p = 0) :s(s), pos(s.size() - 1 - p) {}
 public:
 	GraphemeString operator *() const {
 		return s[pos];
@@ -500,6 +493,6 @@ public:
 		return pos != o.pos;
 	}
 };
-inline RGraphemeIterator GraphemeString::rbegin() const { return RGraphemeIterator(RootPtr<GraphemeString>(this), 1); }
-inline RGraphemeIterator GraphemeString::rend() const { return RGraphemeIterator(RootPtr<GraphemeString>(this), size()); }
+inline RGraphemeIterator GraphemeString::rbegin() const { return RGraphemeIterator(*this, 1); }
+inline RGraphemeIterator GraphemeString::rend() const { return RGraphemeIterator(*this, size()); }
 #endif

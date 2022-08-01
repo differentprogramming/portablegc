@@ -13,7 +13,12 @@ The hash table uses linear probing and stays at least 4 times as big as the numb
 
  */
 
-
+inline int nearest_power_of_2(int i)
+{
+	int k = 1024;
+	while (k < i)k <<= 1;
+	return k;
+}
 
 #define INITIAL_HASH_SIZE 1024
 
@@ -26,10 +31,14 @@ struct CollectableKeyHashEntry
 	bool skip;
 	bool empty;
 	InstancePtr<K> key;
-	V value;
-	CollectableKeyHashEntry() :skip(false), empty(true), key(collectable_null) {}
+
+	alignas(alignof(V)) uint8_t value_bytes[sizeof(V)];
+	V& value() { return *(V*)&value_bytes[0]; }
+	const V& value() const { return *(V*)&value_bytes[0]; }
+	CollectableKeyHashEntry() :skip(false), empty(true), key(static_cast<K *>(collectable_null)) {}
 	int total_instance_vars() const { return 1; }
 	InstancePtrBase* index_into_instance_vars(int num) { return &key;  }
+	~CollectableKeyHashEntry() { if (!empty) value().~V(); }
 };
 
 template<typename K, typename V>
@@ -38,10 +47,10 @@ struct CollectableKeyHashTable :public Collectable
 	int HASH_SIZE;
 	int used;
 	mutable int wasted;
-	InstancePtr<CollectableInlineVector<struct CollectableKeyHashTable<K, V>>> data;
+	InstancePtr<CollectableInlineVector<struct CollectableKeyHashEntry<K, V>>> data;
+	V empty_v;
 
-
-	CollectableKeyHashTable(int s = INITIAL_HASH_SIZE) :HASH_SIZE(s), used(0), wasted(0), data(new CollectableInlineVector<CollectableKeyHashTable<K, V>>(s)) {}
+	CollectableKeyHashTable(const V& ev,int s = INITIAL_HASH_SIZE) :HASH_SIZE(nearest_power_of_2(s)), used(0), wasted(0), data(new CollectableInlineVector<CollectableKeyHashEntry<K, V>>(HASH_SIZE)),empty_v(ev) {}
 
 	void inc_used()
 	{
@@ -50,17 +59,17 @@ struct CollectableKeyHashTable :public Collectable
 		{
 			int OLD_HASH_SIZE = HASH_SIZE;
 			HASH_SIZE <<= 1;
-			RootPtr<CollectableInlineVector<CollectableKeyHashTable<K, V> > > t = data;
-			data = new CollectableInlineVector<CollectableKeyHashTable<K, V> >(HASH_SIZE);
+			RootPtr<CollectableInlineVector<CollectableKeyHashEntry<K, V> > > t = data;
+			data = new CollectableInlineVector<CollectableKeyHashEntry<K, V> >(HASH_SIZE);
 			used = 0;
 			wasted = 0;
 			for (int i = 0; i < OLD_HASH_SIZE; ++i) {
 				GC::safe_point();
-				if (!t[i]->key.empty && !t[i]->skip) insert_or_assign(t[i]->key, t[i]->value);
+				if (!t[i]->empty) insert(t[i]->key, t[i]->value());
 			}
 		}
 	}
-	bool findu(CollectableKeyHashEntry<K, V>*& pair, const RootPtr<K>& key, bool for_insert) const
+	bool findu(CollectableKeyHashEntry<K, V>** pair, const RootPtr<K>& key, bool for_insert) const
 	{
 		uint64_t h = key->hash();
 		int start = h & (HASH_SIZE - 1);
@@ -68,14 +77,14 @@ struct CollectableKeyHashTable :public Collectable
 		CollectableKeyHashEntry<K, V>* recover = nullptr;
 		GC::safe_point();
 		do {
-			CollectableKeyHashEntry<K, V>* e = data[i];
-			if (e->empty) {
+			CollectableKeyHashEntry<K, V>* e = (*data)[i];
+			if (e->empty && !e->skip) {
 				if (recover != nullptr) {
-					pair = recover;
+					*pair = recover;
 					recover->skip = false;
 					--wasted;
 				}
-				else pair = e;
+				else *pair = e;
 				return false;
 			}
 			bool skip = e->skip;
@@ -85,34 +94,36 @@ struct CollectableKeyHashTable :public Collectable
 				for_insert = false;
 			}
 			if (!skip && h == e->key->hash() && e->key->equal(key.get())) {
-				pair = e;
+				*pair = e;
 				return true;
 			}
 
 			i = (i + 1) & (HASH_SIZE - 1);
 		} while (i != start);
+		assert(false);
 		return false;
 	}
 
 	bool contains(const RootPtr<K>& key) const {
 		CollectableKeyHashEntry<K, V>* pair = nullptr;
-		return findu(pair, key, false);
+		return findu(&pair, key, false);
 	}
 	V operator[](const RootPtr<K>& key)
 	{
 		CollectableKeyHashEntry<K, V>* pair = nullptr;
-		if (findu(pair, key, false)) {
+		if (findu(&pair, key, false)) {
 
-			return pair->value;
+			return pair->value();
 		}
-		return V();
+		return empty_v;
 	}
 	bool insert(const RootPtr<K>& key, const V& value)
 	{
 		CollectableKeyHashEntry<K, V>* pair = nullptr;
-		if (!findu(pair, key, true)) {
+		if (!findu(&pair, key, true)) {
 			pair->key = key;
-			pair->value = value;
+			//pair->value.~V();
+			new(&pair->value_bytes[0]) V(value);
 			pair->empty = false;
 			inc_used();
 			return true;
@@ -122,19 +133,20 @@ struct CollectableKeyHashTable :public Collectable
 	void insert_or_assign(const RootPtr<K>& key, const V& value)
 	{
 		CollectableKeyHashEntry<K, V>* pair = nullptr;
-		findu(pair, key, true);
-		bool replacing = !pair->empty;
+		bool replacing=findu(&pair, key, true);
 		pair->key = key;
-		pair->value = value;
+		if (replacing) pair->value().~V();
+		new(&pair->value_bytes[0]) V(value);
 		pair->empty = false;
 		if (!replacing) inc_used();
 	}
 	bool erase(const RootPtr<K>& key)
 	{
 		CollectableKeyHashEntry<K, V>* pair = nullptr;
-		if (findu(pair, key, false)) {
+		if (findu(&pair, key, false)) {
 			pair->skip = true;
-			pair->key = nullptr;
+			pair->key = (K*)collectable_null;
+			pair->value().~V();
 			pair->empty = true;
 			used = used - 1;
 			++wasted;
@@ -156,11 +168,17 @@ struct CollectableValueHashEntry
 {
 	bool skip;
 	bool empty;
-	K key;
+	alignas(alignof(K)) uint8_t key_bytes[sizeof(K)];
+	K& key() { return *(K*)&key_bytes[0]; }
+	const K& key() const { return *(K*)&key_bytes[0]; }
 	InstancePtr<V> value;
-	CollectableValueHashEntry() :skip(false),empty(true), value(collectable_null) {}
+	CollectableValueHashEntry() :skip(false),empty(true), value((const V *)collectable_null) {}
 	int total_instance_vars() const { return 1; }
 	InstancePtrBase* index_into_instance_vars(int num) { return &value; }
+	~CollectableValueHashEntry()
+	{
+		if (!empty) key().~K();
+	}
 };
 
 template<typename K, typename V>
@@ -172,7 +190,7 @@ struct CollectableValueHashTable :public Collectable
 	InstancePtr<CollectableInlineVector<CollectableValueHashEntry<K, V>>> data;
 
 
-	CollectableValueHashTable(int s = INITIAL_HASH_SIZE) :HASH_SIZE(s), used(0), wasted(0), data(new CollectableInlineVector<CollectableValueHashEntry<K, V>>(s)) {}
+	CollectableValueHashTable(int s = INITIAL_HASH_SIZE) :HASH_SIZE(nearest_power_of_2(s)), used(0), wasted(0), data(new CollectableInlineVector<CollectableValueHashEntry<K, V>>(HASH_SIZE)) {}
 
 	void inc_used()
 	{
@@ -187,26 +205,26 @@ struct CollectableValueHashTable :public Collectable
 			wasted = 0;
 			for (int i = 0; i < OLD_HASH_SIZE; ++i) {
 				GC::safe_point();
-				if (!t[i]->empty && !t[i]->skip) insert_or_assign(t[i]->key, t[i]->value);
+				if (!t[i]->empty && !t[i]->skip) insert(t[i]->key(), t[i]->value);
 			}
 		}
 	}
-	bool findu(CollectableValueHashEntry<K, V>*& pair, const K& key, bool for_insert) const
+	bool findu(CollectableValueHashEntry<K, V>** pair, const K& key, bool for_insert) const
 	{
-		uint64_t h = std::hash<K>(key);
+		size_t h = std::hash<K>{}(key);
 		int start = h & (HASH_SIZE - 1);
 		int i = start;
 		CollectableValueHashEntry<K, V>* recover = nullptr;
 		GC::safe_point();
 		do {
 			CollectableValueHashEntry<K, V>* e = data[i];
-			if (e->empty) {
+			if (e->empty && !e->skip) {
 				if (recover != nullptr) {
-					pair = recover;
+					*pair = recover;
 					recover->skip = false;
 					--wasted;
 				}
-				else pair = e;
+				else *pair = e;
 				return false;
 			}
 			bool skip = e->skip;
@@ -215,24 +233,25 @@ struct CollectableValueHashTable :public Collectable
 				recover = e;
 				for_insert = false;
 			}
-			if (!skip && h == std::hash<K>(e->key) && e->key == key) {
-				pair = e;
+			if (!skip && h == std::hash<K>{}(e->key()) && e->key() == key) {
+				*pair = e;
 				return true;
 			}
 
 			i = (i + 1) & (HASH_SIZE - 1);
 		} while (i != start);
+		assert(false);
 		return false;
 	}
 
 	bool contains(const K& key) const {
 		CollectableValueHashEntry<K, V>* pair = nullptr;
-		return findu(pair, key, false);
+		return findu(&pair, key, false);
 	}
 	RootPtr<V> operator[](const K& key)
 	{
 		CollectableValueHashEntry<K, V>* pair = nullptr;
-		if (findu(pair, key, false)) {
+		if (findu(&pair, key, false)) {
 
 			return pair->value;
 		}
@@ -241,8 +260,8 @@ struct CollectableValueHashTable :public Collectable
 	bool insert(const K& key, const RootPtr<V>& value)
 	{
 		CollectableValueHashEntry<K, V>* pair = nullptr;
-		if (!findu(pair, key, true)) {
-			pair->key = key;
+		if (!findu(&pair, key, true)) {
+			new(&pair->key_bytes[0]) K(key);
 			pair->value = value;
 			pair->empty = false;
 			inc_used();
@@ -253,9 +272,9 @@ struct CollectableValueHashTable :public Collectable
 	void insert_or_assign(const K& key, const RootPtr<V>& value)
 	{
 		CollectableValueHashEntry<K, V>* pair = nullptr;
-		findu(pair, key, true);
-		bool replacing = !pair->empty;
-		pair->key = key;
+		bool replacing=findu(&pair, key, true);
+		if(replacing) pair->key().~K();
+		new(&pair->key_bytes[0]) K(key);
 		pair->value = value;
 		pair->empty = false;
 		if (!replacing) inc_used();
@@ -263,10 +282,11 @@ struct CollectableValueHashTable :public Collectable
 	bool erase(const K& key)
 	{
 		CollectableValueHashEntry<K, V>* pair = nullptr;
-		if (findu(pair, key, false)) {
+		if (findu(&pair, key, false)) {
 			pair->skip = true;
-			pair->value = collectable_null;
+			pair->value = (V*)collectable_null;
 			pair->empty = true;
+			pair->key().~K();
 			used = used - 1;
 			++wasted;
 			return true;
@@ -305,7 +325,7 @@ struct CollectableHashTable :public Collectable
 	InstancePtr<CollectableInlineVector<CollectableHashEntry<K,V>>> data;
 
 
-	CollectableHashTable(int s= INITIAL_HASH_SIZE) :HASH_SIZE(s), used(0), wasted(0), data(new CollectableInlineVector<CollectableHashEntry<K,V>>(s)) {}
+	CollectableHashTable(int s= INITIAL_HASH_SIZE) :HASH_SIZE(nearest_power_of_2(s)), used(0), wasted(0), data(new CollectableInlineVector<CollectableHashEntry<K,V>>(HASH_SIZE)) {}
 
 	void inc_used()
 	{
@@ -320,11 +340,11 @@ struct CollectableHashTable :public Collectable
 			wasted = 0;
 			for (int i = 0; i < OLD_HASH_SIZE; ++i) {
 				GC::safe_point();
-				if (!t[i]->empty && !t[i]->skip) insert_or_assign(t[i]->key, t[i]->value);
+				if (!t[i]->empty) insert(t[i]->key, t[i]->value);
 			}
 		}
 	}
-	bool findu(CollectableHashEntry<K, V>*&pair ,const RootPtr<K> &key, bool for_insert) const
+	bool findu(CollectableHashEntry<K, V>**pair ,const RootPtr<K> &key, bool for_insert) const
 	{
 		uint64_t h = key->hash();
 		int start = h & (HASH_SIZE - 1);
@@ -333,13 +353,13 @@ struct CollectableHashTable :public Collectable
 		GC::safe_point();
 		do {
 			CollectableHashEntry<K, V>* e = data[i];
-			if (e->empty) {
+			if (e->empty && !e->skip) {
 				if (recover != nullptr) {
-					pair = recover;
+					*pair = recover;
 					recover->skip = false;
 					--wasted;
 				}
-				else pair = e;
+				else *pair = e;
 				return false;
 			}
 			bool skip = e->skip;
@@ -349,23 +369,24 @@ struct CollectableHashTable :public Collectable
 				for_insert = false;
 			}
 			if (!skip && h == e->key->hash() && e->key->equal(key.get())) {
-				pair = e;
+				*pair = e;
 				return true;
 			}
 
 			i = (i + 1) & (HASH_SIZE - 1);
 		} while (i != start);
+		assert(false);
 		return false;
 	}
 
 	bool contains(const RootPtr<K> &key) const {
-		CollectableHashEntry<K, V>* pair = collectable_null;
-		return findu(pair, key, false);
+		CollectableHashEntry<K, V>* pair = nullptr;
+		return findu(&pair, key, false);
 	}
 	RootPtr<V> operator[](const RootPtr<K>& key)
 	{
 		CollectableHashEntry<K, V>* pair = nullptr;
-		if (findu(pair, key, false)) {
+		if (findu(&pair, key, false)) {
 
 			return pair->value;
 		}
@@ -374,7 +395,7 @@ struct CollectableHashTable :public Collectable
 	bool insert(const RootPtr<K>& key, const RootPtr<V>& value)
 	{
 		CollectableHashEntry<K, V>* pair = nullptr;
-		if (!findu(pair, key, true)) {
+		if (!findu(&pair, key, true)) {
 			pair->key = key;
 			pair->value = value;
 			pair->empty = false;
@@ -386,8 +407,7 @@ struct CollectableHashTable :public Collectable
 	void insert_or_assign(const RootPtr<K>& key, const RootPtr<V>& value)
 	{
 		CollectableHashEntry<K, V>* pair = nullptr;
-		findu(pair, key, true);
-		bool replacing = !pair->empty;
+		bool replacing =findu(&pair, key, true);
 		pair->key = key;
 		pair->value = value;
 		pair->empty = false;
@@ -397,10 +417,10 @@ struct CollectableHashTable :public Collectable
 	bool erase(const RootPtr<K>& key)
 	{
 		CollectableHashEntry<K, V>* pair = nullptr;
-		if (findu(pair, key, false)) {
+		if (findu(&pair, key, false)) {
 			pair->skip = true;
-			pair->key = collectable_null;
-			pair->value = collectable_null;
+			pair->key = (K*)collectable_null;
+			pair->value = (V*)collectable_null;
 			pair->empty = true;
 			used = used - 1;
 			++wasted;
@@ -423,9 +443,26 @@ struct HashEntry
 {
 	bool skip;
 	bool empty;
-	K key;
-	V value;
-	HashEntry() :skip(false),empty(true), key(collectable_null), value(collectable_null) {}
+	alignas(alignof(K)) uint8_t key_bytes[sizeof(K)];
+	K& key() { return *(V*)&key_bytes[0]; }
+	const K& key() const { return *(V*)&key_bytes[0]; }
+	alignas(alignof(V)) uint8_t value_bytes[sizeof(V)];
+	V& value() { return *(V*)&value_bytes[0]; }
+	const V& value() const { return *(V*)&value_bytes[0]; }
+	HashEntry() :skip(false),empty(true) {}
+	HashEntry(const HashEntry& e) : skip(e.skip), empty(e.empty){
+		if (!empty) {
+			new (&key_bytes[0]) K(e.key());
+			new (&value_bytes[0]) V(e.value());
+		}
+	}
+	~HashEntry()
+	{
+		if (!empty) {
+			key().~K();
+			value().~V();
+		}
+	}
 };
 
 template<typename K, typename V>
@@ -435,9 +472,10 @@ struct HashTable :public Collectable
 	int used;
 	mutable int wasted;
 	std::vector<HashEntry<K, V>> data;
+	V empty_v;
 
 
-	HashTable(int s = INITIAL_HASH_SIZE) :HASH_SIZE(s), used(0), wasted(0), data( s) {}
+	HashTable(const V& ev,int s = INITIAL_HASH_SIZE) :HASH_SIZE(nearest_power_of_2(s)), used(0), wasted(0), data(HASH_SIZE),empty_v(ev) {}
 
 	void inc_used()
 	{
@@ -453,26 +491,26 @@ struct HashTable :public Collectable
 			wasted = 0;
 			for (int i = 0; i < OLD_HASH_SIZE; ++i) {
 				GC::safe_point();
-				if (!t[i]-empty && !t[i]->skip) insert_or_assign(t[i]->key, t[i]->value);
+				if (!t[i].empty) insert(t[i].key(), t[i].value());
 			}
 		}
 	}
-	bool findu(HashEntry<K, V>*& pair, const K& key, bool for_insert) const
+	bool findu(HashEntry<K, V>** pair, const K& key, bool for_insert) const
 	{
-		uint64_t h = std::hash<K>(key);
+		size_t h = std::hash<K>{}(key);
 		int start = h & (HASH_SIZE - 1);
 		int i = start;
 		HashEntry<K, V>* recover = nullptr;
 		GC::safe_point();
 		do {
-			HashEntry<K, V>* e = data[i];
-			if (e->empty) {
+			HashEntry<K, V>* e = const_cast<HashEntry<K, V>*>(&data[i]);
+			if (e->empty && !e->skip) {
 				if (recover != nullptr) {
-					pair = recover;
+					*pair = recover;
 					recover->skip = false;
 					--wasted;
 				}
-				else pair = e;
+				else *pair = e;
 				return false;
 			}
 			bool skip = e->skip;
@@ -481,35 +519,38 @@ struct HashTable :public Collectable
 				recover = e;
 				for_insert = false;
 			}
-			if (!skip && h == std::hash<K>(e->key) && e->key == key) {
-				pair = e;
+			if (!skip && h == std::hash<K>{}(e->key()) && e->key() == key) {
+				*pair = e;
 				return true;
 			}
 
 			i = (i + 1) & (HASH_SIZE - 1);
 		} while (i != start);
+		assert(false);
 		return false;
 	}
 
 	bool contains(const K& key) const {
 		HashEntry<K, V>* pair = nullptr;
-		return findu(pair, key, false);
+		return findu(&pair, key, false);
 	}
 	V operator[](const K& key)
 	{
 		HashEntry<K, V>* pair = nullptr;
-		if (findu(pair, key, false)) {
+		if (findu(&pair, key, false)) {
 
-			return pair->value;
+			return pair->value();
 		}
-		return V();
+		return empty_v;
 	}
 	bool insert(const K& key, const V& value)
 	{
 		HashEntry<K, V>* pair = nullptr;
-		if (!findu(pair, key, true)) {
-			pair->key = key;
-			pair->value = value;
+		if (!findu(&pair, key, true)) {
+
+			new(&pair->key_bytes[0]) K(key);
+
+			new(&pair->value_bytes[0]) V(value);
 			pair->empty = false;
 			inc_used();
 			return true;
@@ -519,20 +560,25 @@ struct HashTable :public Collectable
 	void insert_or_assign(const K& key, const V& value)
 	{
 		HashEntry<K, V>* pair = nullptr;
-		findu(pair, key, true);
-		bool replacing = pair->key.get() != collectable_null;
-		pair->key = key;
-		pair->value = value;
+		bool replacing=findu(&pair, key, true);
+		if (replacing) {
+			pair->key().~K();
+			pair->value().~V();
+		}
+		new(&pair->key_bytes[0]) K(key);
+		new(&pair->value_bytes[0]) V(value);
 		pair->empty = false;
 		if (!replacing) inc_used();
 	}
-	bool erase(const RootPtr<K>& key)
+	bool erase(const K& key)
 	{
 		HashEntry<K, V>* pair = nullptr;
-		if (findu(pair, key, false)) {
+		if (findu(&pair, key, false)) {
 			pair->skip = true;
 			pair->empty = true;
 			used = used - 1;
+			pair->key().~K();
+			pair->value().~V();
 			++wasted;
 			return true;
 		}

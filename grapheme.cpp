@@ -1,6 +1,8 @@
 #include <iostream>
 #include "grapheme.h"
 
+
+
 char GSTemp1[GSTEMPLEN];
 char GSTemp2[GSTEMPLEN];
 char GSTemp3[GSTEMPLEN];
@@ -24,7 +26,7 @@ UTF8PROC_DLLEXPORT utf8proc_ssize_t utf8proc_iterate(const utf8proc_uint8_t *str
 
 */
 
-GraphemeString_letter GraphemeString_letter::Null((uint8_t*)"",Singleton);
+//GraphemeString_letter GraphemeString_letter::Null((uint8_t*)"",Singleton);
 
 
 
@@ -65,7 +67,6 @@ int fill_utf8_from_codepoints(const int32_t* source, uint8_t* dest)
 {
 	int sum = 0;
 	while (*source != 0) {
-		GC::safe_point();
 		int t = codepoint_to_utf8(*source++, dest);
 		if (t == 0) return -1;
 		if (dest != nullptr)dest += t;
@@ -100,7 +101,6 @@ LPSTR UnicodeToUTF8(LPCTSTR s)
 		NULL,
 		NULL
 	);
-	
 	return mbuffer;
 }
 
@@ -108,49 +108,48 @@ uint8_t GraphemeString::nullbyte = 0;
 int32_t GraphemeString::nullcodepoint = 0;
 
 
-void GraphemeString_letter::build(const RootPtr< CollectableVector<GraphemeString>>& o)
+void GraphemeString_letter::build(const std::vector<GraphemeString>& o)
 {
 
 
 	int utf8_size = 0;
 
-	for (auto g : *o) {
-		utf8_size += g->byte_length();
+	for (auto g : o) {
+		utf8_size += g.byte_length();
 	}
 
 	uint8_t* store_normalized = (uint8_t*)malloc(utf8_size+1);
 	std::unique_ptr<uint8_t, MyFreeDeleter> buf(store_normalized);
 
 	int offset = 0;
-	for (auto g : *o) {
-		g->fill_utf8(store_normalized + offset);
-		offset += g->byte_length();
+	for (auto g : o) {
+		g.fill_utf8(store_normalized + offset);
+		offset += g.byte_length();
 	}
 	load(store_normalized);
-	
 }
-void GraphemeString_letter::load(const RootPtr <GraphemeString>& o1, const RootPtr <GraphemeString>& o2)
+void GraphemeString_letter::load(const GraphemeString& o1, const GraphemeString& o2)
 {
-	uint8_t* store_normalized = (uint8_t*)malloc(o1->byte_length() + o2->byte_length() + 1);
+	uint8_t* store_normalized = (uint8_t*)malloc(o1.byte_length() + o2.byte_length() + 1);
 	std::unique_ptr<uint8_t, MyFreeDeleter> holder(store_normalized);
-	o1->fill_utf8(store_normalized,false);
-	o2->fill_utf8(store_normalized + o1->byte_length());
+	o1.fill_utf8(store_normalized,false);
+	o2.fill_utf8(store_normalized + o1.byte_length());
 	load(store_normalized);
 }
 
 
-void GraphemeString_letter::load(const RootPtr <GraphemeString>& o)
+void GraphemeString_letter::load(const GraphemeString& o)
 {
-	uint8_t* store_normalized = (uint8_t*)malloc(o->byte_length() + 1);
+	uint8_t* store_normalized = (uint8_t*)malloc(o.byte_length() + 1);
 	std::unique_ptr<uint8_t, MyFreeDeleter> holder(store_normalized);
-	o->fill_utf8(store_normalized);
+	o.fill_utf8(store_normalized);
 	load(store_normalized);
 }
 
 void GraphemeString_letter::load(const uint8_t* source)
 {
 	uint8_t* store_normalized;
-	GC::safe_point();
+
 	int utf8_size = utf8proc_map(source, 0, &store_normalized, (utf8proc_option_t)(UTF8PROC_NULLTERM | UTF8PROC_STABLE | UTF8PROC_COMPOSE) //| UTF8PROC_NLF2LF
 	);
 	if (utf8_size < 0) {
@@ -182,7 +181,7 @@ void GraphemeString_letter::load(const uint8_t* source)
 	int32_t prev_codepoint;
 
 	for (int codepoint_index = 0;; ++codepoint_index) {
-		GC::safe_point();
+
 		codepoint_to_utf8_index.push_back(codepoint_to_utf8_index.back()
 			+ utf8proc_iterate(store_normalized + codepoint_to_utf8_index.back(),
 				-1,
@@ -194,10 +193,10 @@ void GraphemeString_letter::load(const uint8_t* source)
 			break;
 		}
 		if (codepoint_index > 0 && utf8proc_grapheme_break_stateful(prev_codepoint, codepoint_buffer.back(), &grapheme_state)) {
-			grapheme_to_codepoint_index.push_back(codepoint_index);			
+			grapheme_to_codepoint_index.push_back(codepoint_index);
 		}
 		prev_codepoint = codepoint_buffer.back();
 		codepoint_buffer.push_back(0);
 	}
-	
+	log_size(sizeof(this) + 4 * (codepoint_buffer.size() + codepoint_to_utf8_index.size() + grapheme_to_codepoint_index.size()) + utf8_buffer_size);
 }

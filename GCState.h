@@ -164,7 +164,8 @@ namespace GC {
 
     extern thread_local PhaseEnum ThreadState;
     extern thread_local int NotMutatingCount;
-    extern thread_local bool CombinedThread;
+    extern //thread_local 
+        bool CombinedThread;
 
 
 
@@ -187,7 +188,7 @@ namespace GC {
     struct ThreadRAII
     {
         ThreadRAII() { if (!CombinedThread) init_thread(); }
-        ~ThreadRAII() { exit_thread(); }
+        ~ThreadRAII() { if (!CombinedThread) exit_thread(); }
     };
     void thread_leave_mutation();
     void thread_enter_mutation(bool from_init_thread=false);
