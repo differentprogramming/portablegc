@@ -83,7 +83,7 @@ namespace GC {
     void log_alloc(size_t a);
     void log_array_alloc(size_t a, size_t n);
 
-    typedef union SnapPtr {
+    union SnapPtr {
         Handle     handles[2];
         uint64_t   combined;
     };

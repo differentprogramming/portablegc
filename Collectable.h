@@ -145,26 +145,26 @@ public:
 };
 
 template< class T, class U >
-InstancePtr<T> static_pointer_cast(const InstancePtr<U>& v) noexcept
+RootPtr<T> static_pointer_cast(const InstancePtr<U>& v) noexcept
 {
-    return InstancePtr<T>(static_cast<T*>(v.get()));
+    return RootPtr<T>(static_cast<T*>(v.get()));
 }
 
 template< class T, class U >
-InstancePtr<T> const_pointer_cast(const InstancePtr<U>& v) noexcept
+RootPtr<T> const_pointer_cast(const InstancePtr<U>& v) noexcept
 {
-    return InstancePtr<T>(const_cast<T*>(v.get()));
+    return RootPtr<T>(const_cast<T*>(v.get()));
 }
 template< class T, class U >
-InstancePtr<T> dynamic_pointer_cast(const InstancePtr<U>& v) noexcept
+RootPtr<T> dynamic_pointer_cast(const InstancePtr<U>& v) noexcept
 {
-    return InstancePtr<T>(dynamic_cast<T*>(v.get()));
+    return RootPtr<T>(dynamic_cast<T*>(v.get()));
 }
 
 template< class T, class U >
-InstancePtr<T> reinterpret_pointer_cast(const InstancePtr<U>& v) noexcept
+RootPtr<T> reinterpret_pointer_cast(const InstancePtr<U>& v) noexcept
 {
-    return InstancePtr<T>(reinterpret_cast<T*>(v.get()));
+    return RootPtr<T>(reinterpret_cast<T*>(v.get()));
 }
 
 class Collectable;
@@ -1048,7 +1048,7 @@ struct CollectableVectoreUse : public Collectable
         MEM_TEST();
         if (size >= reserved) return false;
         (data.get())[size++] = o;
-        if (size > scan_size) scan_size = size;
+        if (size > scan_size || GC::ThreadState != GC::PhaseEnum::COLLECTING) scan_size = size;
         return true;
     }
     bool pop_back(RootPtr<T>& o) {
@@ -1056,6 +1056,8 @@ struct CollectableVectoreUse : public Collectable
         if (size == 0) return false;
         o = (data.get())[--size].get();
         (data.get())[size] = (T*)collectable_null;
+        assert(GC::ThreadState != GC::PhaseEnum::NOT_MUTATING);
+        if (scan_size > size && GC::ThreadState != GC::PhaseEnum::COLLECTING) scan_size = size;
         return true;
     }
     bool pop_back(InstancePtr<T>& o) {
@@ -1063,6 +1065,8 @@ struct CollectableVectoreUse : public Collectable
         if (size == 0) return false;
         o = (data.get())[--size];
         (data.get())[size] = (T*)collectable_null;
+        assert(GC::ThreadState != GC::PhaseEnum::NOT_MUTATING);
+        if (scan_size > size && GC::ThreadState != GC::PhaseEnum::COLLECTING) scan_size = size;
         return true;
     }
     InstancePtr<T>& at (int i) {
@@ -1079,6 +1083,8 @@ struct CollectableVectoreUse : public Collectable
         MEM_TEST();
         for (int i = 0; i < size; ++i) (data.get())[i] = (T*)collectable_null;
         size = 0;
+        assert(GC::ThreadState != GC::PhaseEnum::NOT_MUTATING);
+        if (GC::ThreadState != GC::PhaseEnum::COLLECTING) scan_size =0 ;
     }
     bool resize(int s, const RootPtr<T>& exemplar)
     {
@@ -1086,7 +1092,9 @@ struct CollectableVectoreUse : public Collectable
         if (s > reserved) return false;
         if (s < size) while (size > s)(data.get())[--size] = (T*)collectable_null;
         else while (size < s)(data.get())[size++] = exemplar;
-        if (size > scan_size) scan_size = size;
+        assert(GC::ThreadState != GC::PhaseEnum::NOT_MUTATING);
+        if (size > scan_size || GC::ThreadState != GC::PhaseEnum::COLLECTING) scan_size = size;
+
         return true;
     }
     bool resize(int s, InstancePtr<T>& exemplar)
@@ -1095,7 +1103,8 @@ struct CollectableVectoreUse : public Collectable
         if (s > reserved) return false;
         if (s < size) while (size > s)(data.get())[--size] = (T*)collectable_null;
         else while (size < s)(data.get())[size++] = exemplar;
-        if (size > scan_size) scan_size = size;
+        assert(GC::ThreadState != GC::PhaseEnum::NOT_MUTATING);
+        if (size > scan_size || GC::ThreadState != GC::PhaseEnum::COLLECTING) scan_size = size;
         return true;
     }
     bool resize(int s)
@@ -1104,7 +1113,8 @@ struct CollectableVectoreUse : public Collectable
         if (s > reserved) return false;
         if (s < size) while (size > s)(data.get())[--size] = (T*)collectable_null;
         size = s;
-        if (size > scan_size) scan_size = size;
+        assert(GC::ThreadState != GC::PhaseEnum::NOT_MUTATING);
+        if (size > scan_size || GC::ThreadState != GC::PhaseEnum::COLLECTING) scan_size = size;
         return true;
     }
     bool push_front(const RootPtr<T>& o)
@@ -1121,12 +1131,13 @@ struct CollectableVectoreUse : public Collectable
             ++size;
         }
         else return push_back(o);
-        if (size > scan_size) scan_size = size;
+        if (size > scan_size || GC::ThreadState != GC::PhaseEnum::COLLECTING) scan_size = size;
         return true;
     }
     void update_scan_size()
     {
-        if (size > scan_size) scan_size = size;
+        assert(GC::ThreadState != GC::PhaseEnum::NOT_MUTATING);
+        if (size > scan_size || GC::ThreadState != GC::PhaseEnum::COLLECTING) scan_size = size;
     }
 };
 

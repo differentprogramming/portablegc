@@ -648,6 +648,13 @@ namespace GC {
 
         NotMutatingCount = 1;
         thread_enter_mutation(true);
+
+        static bool SNilInit = false;
+        if (!SNilInit) {
+            SNilInit = true;
+            _SNil_ = new RootPtr<Sexp>;
+            SNil = new SexpNil;
+        }
     }
 
     void FreeThreadHandles();

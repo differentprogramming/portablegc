@@ -444,8 +444,8 @@ struct HashEntry
 	bool skip;
 	bool empty;
 	alignas(alignof(K)) uint8_t key_bytes[sizeof(K)];
-	K& key() { return *(V*)&key_bytes[0]; }
-	const K& key() const { return *(V*)&key_bytes[0]; }
+	K& key() { return *(K*)&key_bytes[0]; }
+	const K& key() const { return *(K*)&key_bytes[0]; }
 	alignas(alignof(V)) uint8_t value_bytes[sizeof(V)];
 	V& value() { return *(V*)&value_bytes[0]; }
 	const V& value() const { return *(V*)&value_bytes[0]; }
@@ -569,6 +569,22 @@ struct HashTable :public Collectable
 		new(&pair->value_bytes[0]) V(value);
 		pair->empty = false;
 		if (!replacing) inc_used();
+	}
+	void clear()
+	{
+		if (used > 0) {
+			for (int i = 0; i < HASH_SIZE; ++i) {
+				HashEntry<K, V>* pair = &data[i];
+				if (!pair->empty) {
+					pair->key().~K();
+					pair->value().~V();
+				}
+				pair->empty = true;
+				pair->skip = false;
+			}
+			wasted = 0;
+			used = 0;
+		}
 	}
 	bool erase(const K& key)
 	{
